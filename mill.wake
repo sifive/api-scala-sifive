@@ -43,16 +43,21 @@ global def millBuild name =
 # Generates the text for a mill module from a ScalaModule
 def generateMillModule = match _
   ScalaProject name dir deps mill =
+    def millSourcePath = match mill
+      None = "  override def millSourcePath = os.pwd / \"{dir}\" / \"{name}\""
+      Some _ =
+        "  override def millSourcePath = os.pwd / RelPath(\"{dir}\") / super.millSourcePath.relativeTo(os.pwd)"
     def a =
       def base = "object {name} extends ScalaModule"
       def res = match mill
         None = "{base} \{", Nil
         Some (MillBaseProject file trait) =
           def bb = "{name}BaseBuild"
-          "import $file.`{dir}`.\{`{file}` => {bb}\}", "{base} with {bb}.{trait} \{", Nil
+          def path = catWith "." $ map (\x "`{x}`") $ tokenize "/" dir
+          "import $file.{path}.\{`{file}` => {bb}\}", "{base} with {bb}.{trait} \{", Nil
       res ++ b
     def b = "  def scalaVersion = \"2.12.4\"", c
-    def c = "  override def millSourcePath = os.pwd / \"{dir}\" / \"{name}\"", d
+    def c = millSourcePath, d
     def d =
       def body = catWith ", " (map scalaProjectName deps)
       if matches "" body then e else "  def moduleDeps = Seq({body})", e
