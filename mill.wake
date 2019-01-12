@@ -60,7 +60,11 @@ def generateMillModule = match _
     def c = millSourcePath, d
     def d =
       def body = catWith ", " (map scalaProjectName deps)
-      if matches "" body then e else "  def moduleDeps = Seq({body})", e
+      if matches "" body
+      then e
+      else
+        def x = "  def wakeModuleDeps = Seq({body})"
+        "{x}\n  def moduleDeps = super.moduleDeps ++ wakeModuleDeps", e
     def e = "\}\n", Nil
     catWith "\n" a
 
