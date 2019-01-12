@@ -1,9 +1,7 @@
 
 global def millBin _ =
   def version = "0.3.5"
-  def dir =
-    def d = simplify "{here}/bin"
-    if mkdir d 0775 then d else raise "Could not mkdir {d}"
+  def dir = mkdir 0775 (simplify "{here}/bin")
   def getter = "{here}/getMill.sh"
   def cmd = (getter, version, Nil)
   def doit = job cmd (getter, dir, Nil)
@@ -85,8 +83,7 @@ global def millFile _ = match (subscribe scalaProjects)
     def modules = map generateMillModule projects
     def content = (catWith "\n" (millFilePrefix, modules))
     def filename = simplify "./build.sc"
-    waitOne (\_ Some filename) (write filename content 0664)
-
+    waitOne (\_ Some filename) (write 0664 filename content)
 
 global def ivyCache = simplify "{here}/.coursier"
 global def millCache = simplify "{here}/.mill"
@@ -102,12 +99,13 @@ global def millTask proj task args =
     None = raise "Cannot run millTask if there are no scala projects!"
   def outDir = simplify "./out"
   def inputs =
-    def projDirs = (map scalaProjectDir (subscribe scalaProjects))
+    # Uniqufiy the dirs so that we don't get duplicate files
+    def unique dirs = distinctBy (_ ==^ _) (sortBy (_ <^ _) dirs)
+    def projDirs = unique (map scalaProjectDir (subscribe scalaProjects))
     # Lie about inputs, hashing too many files is slow so until that's faster, don't hash caches
     # def allDirs = ivyCache, millCache, outDir, projDirs
     def allDirs = projDirs
     mill, buildFile, (map (files _ '.*') allDirs).flatten
-  #def _ = println inputs
   def env = "COURSIER_CACHE={ivyCache}"
   def project = proj.scalaProjectName
   def dir = proj.scalaProjectDir
