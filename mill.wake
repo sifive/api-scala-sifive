@@ -42,7 +42,7 @@ global def millBuild name =
 def generateMillModule = match _
   ScalaProject name dir deps mill =
     def millSourcePath = match mill
-      None = "  override def millSourcePath = os.pwd / \"{dir}\" / \"{name}\""
+      None = "  override def millSourcePath = os.pwd / RelPath(\"{dir}\") / \"{name}\""
       Some _ =
         "  override def millSourcePath = os.pwd / RelPath(\"{dir}\") / super.millSourcePath.relativeTo(os.pwd)"
     def a =
@@ -87,8 +87,19 @@ global def millFile _ = match (subscribe scalaProjects)
 
 global def ivyCache = simplify "{here}/.coursier"
 global def millCache = simplify "{here}/.mill"
+publish environment = "COURSIER_CACHE={ivyCache}"
 
 def millBaseCmd _ = (millBin ""), "-i", "--home", millCache, Nil
+
+global def scalaProjectAssembly proj =
+  def job = millTask proj "assembly" Nil
+  def name = scalaProjectName proj
+  def jar =
+    def regex = simplify "./out/{name}/assembly/dest/out.jar"
+    find (matches regex _.first) job.outputs
+  match jar
+    None = raise "Error during assembly"
+    Some (Pair f _) = f.first
 
 # Invoke mill directly
 # TODO What do we do about having to hash all of the ivy cache and files in out?
@@ -106,10 +117,11 @@ global def millTask proj task args =
     # def allDirs = ivyCache, millCache, outDir, projDirs
     def allDirs = projDirs
     mill, buildFile, (map (files _ '.*') allDirs).flatten
-  def env = "COURSIER_CACHE={ivyCache}"
+  # FIXME hashing is still slow, only have jars at outputs
+  def outputs _ = files outDir '.*jar'
   def project = proj.scalaProjectName
   def dir = proj.scalaProjectDir
   def cmd = (mill, "-i", "--home", millCache, "show", "{project}.{task}", Nil) ++ args
-  def doit = cached_manual_job "." "" (env, environment) cmd inputs (\_ Nil)
+  def doit = cached_manual_job "." "" environment cmd inputs outputs
   doit
 
