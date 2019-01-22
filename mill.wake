@@ -72,12 +72,13 @@ def millFilePrefix =
   def c = "import ammonite.ops._\n", Nil
   catWith "\n" a
 
+def allScalaProjects = subscribe scalaProjects ++ (subscribe scalaProjectLists).flatten
 # This generates a top-level mill file if there are Scala projects present
 # This also gets all dependencies from the internet, the generated build.sc is used as a stand-in
 #   for other tasks to depend on
 # TODO
 #  * Make more efficient by using ROOT of dependency tree(s)
-global def millFile _ = match (subscribe scalaProjects)
+global def millFile _ = match allScalaProjects
   Nil = None
   projects =
     def modules = map generateMillModule projects
@@ -112,7 +113,7 @@ global def millTask proj task args =
   def inputs =
     # Uniqufiy the dirs so that we don't get duplicate files
     def unique dirs = distinctBy (_ ==^ _) (sortBy (_ <^ _) dirs)
-    def projDirs = unique (map scalaProjectDir (subscribe scalaProjects))
+    def projDirs = unique (map scalaProjectDir allScalaProjects)
     # Lie about inputs, hashing too many files is slow so until that's faster, don't hash caches
     # def allDirs = ivyCache, millCache, outDir, projDirs
     def allDirs = projDirs
