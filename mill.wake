@@ -123,6 +123,6 @@ global def millTask proj task args =
   def project = proj.scalaProjectName
   def dir = proj.scalaProjectDir
   def cmd = (mill, "-i", "--home", millCache, "show", "{project}.{task}", Nil) ++ args
-  def doit = cached_manual_job "." "" environment cmd inputs outputs
+  def doit = manual_job cmd inputs outputs
   doit
 
