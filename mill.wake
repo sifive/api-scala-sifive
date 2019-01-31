@@ -97,10 +97,10 @@ global def scalaProjectAssembly proj =
   def name = scalaProjectName proj
   def jar =
     def regex = simplify "./out/{name}/assembly/dest/out.jar"
-    find (matches regex _.first) job.outputs
+    find (matches regex) job.outputs
   match jar
     None = raise "Error during assembly"
-    Some (Pair f _) = f.first
+    Some (Pair f _) = f
 
 # Invoke mill directly
 # TODO What do we do about having to hash all of the ivy cache and files in out?
