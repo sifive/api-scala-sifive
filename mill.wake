@@ -111,13 +111,14 @@ global def millTask proj task args =
     None = raise "Cannot run millTask if there are no scala projects!"
   def outDir = simplify "./out"
   def inputs =
+    def everything = (sources "." '.*\.scala') ++ (files "." '.*\.sc')
     # Uniqufiy the dirs so that we don't get duplicate files
     def unique dirs = distinctBy (_ ==^ _) (sortBy (_ <^ _) dirs)
     def projDirs = unique (map scalaProjectDir allScalaProjects)
     # Lie about inputs, hashing too many files is slow so until that's faster, don't hash caches
     # def allDirs = ivyCache, millCache, outDir, projDirs
     def allDirs = projDirs
-    mill, buildFile, (map (files _ '.*') allDirs).flatten
+    mill, buildFile, everything #((map (files _ '.*') allDirs).flatten
   # FIXME hashing is still slow, only have jars at outputs
   def outputs _ = files outDir '.*jar'
   def project = proj.scalaProjectName
