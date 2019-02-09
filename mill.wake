@@ -78,7 +78,7 @@ def allScalaProjects = subscribe scalaProjects ++ (subscribe scalaProjectLists).
 #   for other tasks to depend on
 # TODO
 #  * Make more efficient by using ROOT of dependency tree(s)
-global def millFile _ = match allScalaProjects
+global def millFile extras = match (allScalaProjects ++ extras)
   Nil = None
   projects =
     def modules = map generateMillModule projects
@@ -106,7 +106,7 @@ global def scalaProjectAssembly proj =
 # TODO What do we do about having to hash all of the ivy cache and files in out?
 global def millTask proj task args =
   def mill = millBin ""
-  def buildFile = match (millFile "")
+  def buildFile = match (millFile (proj, Nil))
     Some f = f
     None = raise "Cannot run millTask if there are no scala projects!"
   def outDir = simplify "./out"
