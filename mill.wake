@@ -109,7 +109,7 @@ global def millTask proj task args =
   def buildFile = match (millFile (proj, Nil))
     Some f = f
     None = raise "Cannot run millTask if there are no scala projects!"
-  def outDir = simplify "./out"
+  def outDir = simplify "./out/{project}/{task}"
   def inputs =
     def everything = (sources "." '.*\.scala') ++ (files "." '.*\.sc')
     # Uniqufiy the dirs so that we don't get duplicate files
