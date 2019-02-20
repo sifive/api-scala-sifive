@@ -2,24 +2,24 @@
 global def millBin _ =
   def version = "0.3.5"
   def dir = mkdir 0775 (simplify "{here}/bin")
-  def getter = "{here}/getMill.sh"
-  def cmd = (getter, version, Nil)
+  def getter = sources here 'getMill\.sh' | head
+  def cmd = (getter.getPathName, version, Nil)
   def doit = job cmd (getter, dir, Nil)
-  doit.output
+  doit.getJobOutput
 
 # Base mill project for generated project to extend
 # trait to extend, .sc file to import
 data MillBaseProject = MillBaseProject String String
 
 data ScalaProject =
-  ScalaProject String String (List ScalaProject) (Option MillBaseProject)
+  ScalaProject String Path (List ScalaProject) (Option MillBaseProject)
 
 # name, root directory, Scala project dependencies
 global def simpleScalaProject name root deps = ScalaProject name root deps None
 
 # name, root directory, Scala project dependencies, mill file to import, mill trait to extend
 global def millScalaProject name root deps mfile mtrait =
-  ScalaProject name root deps (Some (MillBaseProject mfile mtrait))
+  ScalaProject name (mkdir 0775 root) deps (Some (MillBaseProject mfile mtrait))
 
 global def scalaProjectName = match _
   ScalaProject name _ _ _ = name
@@ -40,7 +40,8 @@ global def millBuild name =
 
 # Generates the text for a mill module from a ScalaModule
 def generateMillModule = match _
-  ScalaProject name dir deps mill =
+  ScalaProject name dirPath deps mill =
+    def dir = dirPath.getPathName
     def millSourcePath = match mill
       None = "  override def millSourcePath = os.pwd / RelPath(\"{dir}\") / \"{name}\""
       Some _ =
@@ -84,20 +85,20 @@ global def millFile extras = match (allScalaProjects ++ extras)
     def modules = map generateMillModule projects
     def content = (catWith "\n" (millFilePrefix, modules))
     def filename = simplify "./build.sc"
-    waitOne (\_ Some filename) (write 0664 filename content)
+    write 0664 filename content | Some
 
 global def ivyCache = simplify "{here}/.coursier"
 global def millCache = simplify "{here}/.mill"
 publish environment = "COURSIER_CACHE={ivyCache}"
 
-def millBaseCmd _ = (millBin ""), "-i", "--home", millCache, Nil
+def millBaseCmd _ = (millBin "").getPathName, "-i", "--home", millCache, Nil
 
 global def scalaProjectAssembly proj =
   def job = millTask proj "assembly" Nil
   def name = scalaProjectName proj
   def jar =
     def regex = simplify "./out/{name}/assembly/dest/out.jar"
-    find (matches regex) job.outputs
+    find (matches regex _.getPathName) job.getJobOutputs
   match jar
     None = raise "Error during assembly"
     Some (Pair f _) = f
@@ -111,19 +112,15 @@ global def millTask proj task args =
     None = raise "Cannot run millTask if there are no scala projects!"
   def outDir = simplify "./out/{project}/{task}"
   def inputs =
-    def everything = (sources "." '.*\.scala') ++ (files "." '.*\.sc')
+    def everything = (sources "." '.*\.scala')# ++ (files "." '.*\.sc')
     # Uniqufiy the dirs so that we don't get duplicate files
-    def unique dirs = distinctBy (_ ==^ _) (sortBy (_ <^ _) dirs)
-    def projDirs = unique (map scalaProjectDir allScalaProjects)
     # Lie about inputs, hashing too many files is slow so until that's faster, don't hash caches
-    # def allDirs = ivyCache, millCache, outDir, projDirs
-    def allDirs = projDirs
-    mill, buildFile, everything #((map (files _ '.*') allDirs).flatten
+    mill, buildFile, everything
   # FIXME hashing is still slow, only have jars at outputs
   def outputs _ = files outDir '.*jar'
   def project = proj.scalaProjectName
   def dir = proj.scalaProjectDir
-  def cmd = (mill, "-i", "--home", millCache, "show", "{project}.{task}", Nil) ++ args
-  def doit = manual_job cmd inputs outputs
+  def cmd = (mill.getPathName, "-i", "--home", millCache, "show", "{project}.{task}", Nil) ++ args
+  def doit = manualJob cmd inputs outputs
   doit
 
