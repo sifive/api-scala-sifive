@@ -73,13 +73,19 @@ def millFilePrefix =
   def c = "import ammonite.ops._\n", Nil
   catWith "\n" a
 
-def allScalaProjects = subscribe scalaProjects ++ (subscribe scalaProjectLists).flatten
+def allScalaProjects =
+  subscribe scalaProjects ++ (subscribe scalaProjectLists).flatten
+  | sortBy (lt depsComp)
+  | distinctBy (eq depsComp)
+
+def depsComp proj1 proj2 =
+  scmpNFKC proj1.scalaProjectName proj2.scalaProjectName
 # This generates a top-level mill file if there are Scala projects present
 # This also gets all dependencies from the internet, the generated build.sc is used as a stand-in
 #   for other tasks to depend on
 # TODO
 #  * Make more efficient by using ROOT of dependency tree(s)
-global def millFile extras = match (allScalaProjects ++ extras)
+global def millFile = match allScalaProjects
   Nil = None
   projects =
     def modules = map generateMillModule projects
@@ -107,7 +113,7 @@ global def scalaProjectAssembly proj =
 # TODO What do we do about having to hash all of the ivy cache and files in out?
 global def millTask proj task args =
   def mill = millBin ""
-  def buildFile = match (millFile (proj, Nil))
+  def buildFile = match millFile
     Some f = f
     None = raise "Cannot run millTask if there are no scala projects!"
   def outDir = simplify "./out/{project}/{task}"
