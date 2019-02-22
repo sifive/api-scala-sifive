@@ -97,7 +97,7 @@ global def ivyCache = simplify "{here}/.coursier"
 global def millCache = simplify "{here}/.mill"
 publish environment = "COURSIER_CACHE={ivyCache}"
 
-def millBaseCmd _ = (millBin "").getPathName, "-i", "--home", millCache, Nil
+def millBaseCmd _ = (millBin Unit).getPathName, "-i", "--home", millCache, Nil
 
 global def scalaProjectAssembly proj =
   def job = millTask proj "assembly" Nil
@@ -112,7 +112,7 @@ global def scalaProjectAssembly proj =
 # Invoke mill directly
 # TODO What do we do about having to hash all of the ivy cache and files in out?
 global def millTask proj task args =
-  def mill = millBin ""
+  def mill = millBin Unit
   def buildFile = match millFile
     Some f = f
     None = raise "Cannot run millTask if there are no scala projects!"

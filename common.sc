@@ -19,7 +19,6 @@ trait CommonOptions extends ScalaModule {
     "-feature",
     "-language:reflectiveCalls",
     "-unchecked",
-    "-Xcheckinit",
     "-Xlint:infer-any",
     //"-Xlint:missing-interpolator",
     "-Xsource:2.11"
