@@ -1,0 +1,47 @@
+
+def root = mkdir 0775 "./.scala-wake"
+
+global def coursierBin _ =
+  def version = "1.1.0-M11-2"
+  def dir = mkdir 0775 "{root.getPathName}/bin"
+  def getter = sources here 'getCoursier\.sh' | head
+  def cmd = getter.getPathName, dir.getPathName, version, Nil
+  def doit = job cmd (dir, getter, Nil)
+  doit.getJobOutput
+
+# TODO Dotty support?
+tuple ScalaVersion =
+  global Major Integer
+  global Minor Integer
+
+global def makeScalaVersion str =
+  def err = raise "Only Scala 2.X.Y accepted, got '{str}'"
+  match (tokenize '\.' str)
+    majormajor, major, minor, Nil =
+      if majormajor ==~ "2" then ScalaVersion (int major) (int minor) else err
+    _ = err
+
+tuple IvyDep =
+  global Org String
+  global Name String
+  global Rev String
+
+global def makeScalaIvyDep string version =
+  def err = raise "Malformed Scala Ivy Dep '{string}'"
+  match (tokenize ':' string)
+    org, name, rev, Nil = IvyDep org name rev
+    org, blank, name, rev, Nil =
+      def namex = "{name}_2.{str(version.getScalaVersionMajor)}"
+      if "{blank}x" ==~ "x" then IvyDep org namex rev else err
+    _ = err
+
+global def jack = "{str((ScalaVersion 2 12).getScalaVersionMajor)}"
+
+tuple ScalaModule =
+  global Name String
+  global RootDir String
+  global ScalaVersion ScalaVersion
+  global IvyDeps List IvyDep
+  global SourceDirs List String
+  global ResourceDirs List String
+
