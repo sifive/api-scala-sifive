@@ -83,13 +83,13 @@ global def buildDir module = "{root.getPathName}/{module.getScalaModuleName}"
 
 global def millFile2 module =
   def fn = "{module.buildDir}/build.sc"
-  def _ = println fn
   def contents = millFileContents module
-  write 0644 fn contents
+  # TODO make this not 0775
+  # See https://github.com/sifive/wake/issues/49
+  write 0775 fn contents
 
 global def jack =
-  def module = makeSBTScalaModule "test-proj" "test-proj" "2.12.4"
-  millFileContents module
+  makeSBTScalaModule "test-proj" "test-proj" "2.12.4"
 
 
 #global def scalaModuleJar module =
