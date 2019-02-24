@@ -14,6 +14,9 @@ tuple ScalaVersion =
   global Major Integer
   global Minor Integer
 
+def scalaVersionToString = match _
+  ScalaVersion major minor = "2.{str(major)}.{str(minor)}"
+
 global def makeScalaVersion str =
   def err = raise "Only Scala 2.X.Y accepted, got '{str}'"
   match (tokenize '\.' str)
@@ -21,6 +24,7 @@ global def makeScalaVersion str =
       if majormajor ==~ "2" then ScalaVersion (int major) (int minor) else err
     _ = err
 
+# TODO additional resolvers/repositories
 tuple IvyDep =
   global Org String
   global Name String
@@ -35,8 +39,6 @@ global def makeScalaIvyDep string version =
       if "{blank}x" ==~ "x" then IvyDep org namex rev else err
     _ = err
 
-global def jack = "{str((ScalaVersion 2 12).getScalaVersionMajor)}"
-
 tuple ScalaModule =
   global Name String
   global RootDir String
@@ -45,3 +47,49 @@ tuple ScalaModule =
   global SourceDirs List String
   global ResourceDirs List String
 
+# Should the source dirs be relative to root or incldue it?
+global def makeSBTScalaModule name dir version =
+  def scalaVersion = makeScalaVersion version
+  def sourceDirs = map ("{dir}/{_}") ("src/main/scala", "src/main/java", Nil)
+  def resourceDirs = "{dir}/src/main/resources", Nil
+  ScalaModule name dir scalaVersion Nil sourceDirs resourceDirs
+
+# Helpers for generating files with tabbing
+data Scope =
+  Line String
+  Scope String (List Scope) String
+  Scopes (List Scope)
+
+global def scopeToLines = match _
+  Line s = s, Nil
+  Scope pre scopes post =
+    def scopesx = map scopeToLines scopes | flatten | map ("  {_}")
+    (pre, scopesx) ++ (post, Nil)
+  Scopes scopes = map scopeToLines scopes | flatten
+
+global def millFileContents = match _
+  ScalaModule name dir version deps sources resources =
+    def imports = Line "import mill._, scalalib._\nimport ammonite.ops._\n"
+    def verStr = Line "def scalaVersion = \"{version.scalaVersionToString}\""
+    def sourceScope =
+      def xs = map (Line "os.pwd / up / up / \"{name}\" / RelPath(\"{_}\"),") sources
+      Scope "def sources = T.sources(" xs ")"
+    def moduleScope =
+      def xs = verStr, sourceScope, Nil
+      Scope "object `{name}` extends ScalaModule \{" xs "\}"
+    Scopes (imports, moduleScope, Nil) | scopeToLines | catWith "\n"
+
+global def buildDir module = "{root.getPathName}/{module.getScalaModuleName}"
+
+global def millFile2 module =
+  def fn = "{module.buildDir}/build.sc"
+  def _ = println fn
+  def contents = millFileContents module
+  write 0644 fn contents
+
+global def jack =
+  def module = makeSBTScalaModule "test-proj" "test-proj" "2.12.4"
+  millFileContents module
+
+
+#global def scalaModuleJar module =
