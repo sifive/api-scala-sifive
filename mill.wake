@@ -1,12 +1,4 @@
 
-global def millBin _ =
-  def version = "0.3.5"
-  def dir = mkdir 0775 (simplify "{here}/bin")
-  def getter = sources here 'getMill\.sh' | head
-  def cmd = (getter.getPathName, version, Nil)
-  def doit = job cmd (getter, dir, Nil)
-  doit.getJobOutput
-
 # Base mill project for generated project to extend
 # trait to extend, .sc file to import
 data MillBaseProject = MillBaseProject String String

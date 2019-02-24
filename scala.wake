@@ -1,5 +1,5 @@
 
-def root = mkdir 0775 "./.scala-wake"
+def root = mkdir 0775 ".scala-wake"
 
 global def coursierBin _ =
   def version = "1.1.0-M11-2"
@@ -8,6 +8,15 @@ global def coursierBin _ =
   def cmd = getter.getPathName, dir.getPathName, version, Nil
   def doit = job cmd (dir, getter, Nil)
   doit.getJobOutput
+
+global def millBin _ =
+  def version = "0.3.5"
+  def dir = mkdir 0775 "{root.getPathName}/bin"
+  def getter = sources here 'getMill\.sh' | head
+  def cmd = getter.getPathName, dir.getPathName, version, Nil
+  def doit = job cmd (getter, dir, Nil)
+  doit.getJobOutput
+
 
 # TODO Dotty support?
 tuple ScalaVersion =
@@ -92,4 +101,3 @@ global def jack =
   makeSBTScalaModule "test-proj" "test-proj" "2.12.4"
 
 
-#global def scalaModuleJar module =
