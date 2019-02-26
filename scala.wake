@@ -1,13 +1,21 @@
 
 def root = mkdir 0775 ".scala-wake"
 
-global def coursierBin _ =
+#global def coursierBin _ =
+#  def version = "1.1.0-M11-2"
+#  def dir = mkdir 0775 "{root.getPathName}/bin"
+#  def getter = sources here 'getCoursier\.sh' | head
+#  def cmd = getter.getPathName, dir.getPathName, version, Nil
+#  def doit = job cmd (dir, getter, Nil)
+#  doit.getJobOutput
+
+# Should be installed by wake
+global def coursierBin =
   def version = "1.1.0-M11-2"
-  def dir = mkdir 0775 "{root.getPathName}/bin"
-  def getter = sources here 'getCoursier\.sh' | head
-  def cmd = getter.getPathName, dir.getPathName, version, Nil
-  def doit = job cmd (dir, getter, Nil)
-  doit.getJobOutput
+  def bin = files "{root.getPathName}/bin" ".*coursier.*"
+  bin | head | makeStatePath
+
+global def ivyCache = mkdir 0775 "{root.getPathName}/cache"
 
 global def millBin _ =
   def version = "0.3.5"
@@ -17,6 +25,18 @@ global def millBin _ =
   def doit = job cmd (getter, dir, Nil)
   doit.getJobOutput
 
+# TODO
+# - Rename?
+# Given List IvyDep, returns List String
+# Return is paths to jars of the input IvyDeps and their transitive dependencies
+global def coursierFetch deps =
+  def depStrs = map ivyDepToCoursier deps
+  def cachedDeps = files ivyCache.getPathName '.*' | map makeStatePath
+  def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, "-m", "offline", depStrs
+  def doit = job cmd (coursierBin, cachedDeps)
+  if doit.getJobStatus == 0 then
+    doit.getJobStdout | tokenize '\n' | filter ("{_}x" !=~ "x") # filter non-empty
+  else raise "Cannot resolve ivy dependencies, have you run `wit update` (currently unimplemented)?"
 
 # TODO Dotty support?
 tuple ScalaVersion =
@@ -39,14 +59,22 @@ tuple IvyDep =
   global Name String
   global Rev String
 
-global def makeScalaIvyDep string version =
+global def makeScalaIvyDep string scalaVersion =
   def err = raise "Malformed Scala Ivy Dep '{string}'"
   match (tokenize ':' string)
     org, name, rev, Nil = IvyDep org name rev
     org, blank, name, rev, Nil =
-      def namex = "{name}_2.{str(version.getScalaVersionMajor)}"
+      def namex = "{name}_2.{str(scalaVersion.getScalaVersionMajor)}"
       if "{blank}x" ==~ "x" then IvyDep org namex rev else err
     _ = err
+
+def ivyDepToCoursier = match _
+  IvyDep org name rev = "{org}:{name}:{rev}"
+
+global def scalaCompilerIvyDep version =
+  IvyDep "org.scala-lang" "scala-compiler" (scalaVersionToString version)
+global def scalaLibraryIvyDep version =
+  IvyDep "org.scala-lang" "scala-library" (scalaVersionToString version)
 
 tuple ScalaModule =
   global Name String
@@ -59,9 +87,87 @@ tuple ScalaModule =
 # Should the source dirs be relative to root or incldue it?
 global def makeSBTScalaModule name dir version =
   def scalaVersion = makeScalaVersion version
-  def sourceDirs = map ("{dir}/{_}") ("src/main/scala", "src/main/java", Nil)
+  def sourceDirs = "src/main/scala", "src/main/java", Nil | map ("{dir}/{_}")
   def resourceDirs = "{dir}/src/main/resources", Nil
   ScalaModule name dir scalaVersion Nil sourceDirs resourceDirs
+
+global def buildDir module = "{root.getPathName}/{module.getScalaModuleName}"
+
+global def millFile2 module =
+  def fn = "{module.buildDir}/build.sc"
+  def contents = millFileContents module
+  # TODO make this not 0775
+  # See https://github.com/sifive/wake/issues/49
+  write 0664 fn contents
+
+#global def scalaModuleToBloop = match _
+#  ScalaModule name dir version deps sources resources =
+
+global def bloopDir = mkdir 0775 "{root.getPathName}/.bloop"
+
+# TODO implement scalacOptions
+global def bloopScalaLibJSON scalaVersion =
+  def ivyDep = scalaCompilerIvyDep scalaVersion
+  def org = Pair "organization" (JString ivyDep.getIvyDepOrg)
+  def name = Pair "name" (JString ivyDep.getIvyDepName)
+  def version = Pair "version" (JString ivyDep.getIvyDepRev)
+  def options = Pair "options" (JArray Nil)
+  def jars = Pair "jars" $ coursierFetch (ivyDep, Nil) | map JString | JArray
+  def setup =
+    def fields =
+      Pair "order" (JString "mixed")
+      , Pair "addLibraryToBootClasspath" (JBoolean True)
+      , Pair "addCompilerToClasspath" (JBoolean False)
+      , Pair "addExtraJarsToClasspath" (JBoolean False)
+      , Pair "manageBootClasspath" (JBoolean True)
+      , Pair "filterLibraryFromClasspath" (JBoolean True)
+      , Nil
+    Pair "setup" (JObject fields)
+  JObject (org, name, version, options, jars, setup, Nil)
+
+# TODO
+# - implement module dependencies (see jdeps)
+global def bloopScalaModuleJSON scalaModule =
+  def bloopVersion = "1.2.5"
+  def project = match scalaModule
+    ScalaModule name dir version ivyDeps sourceDirs resourceDirs =
+      def myDir = "{bloopDir.getPathName}/name"
+      def scalaLib = scalaLibraryIvyDep version
+      def fields =
+        Pair   "name" (JString name)
+        , Pair "directory" (JString dir)
+        , Pair "sources" (JArray $ map (JString "{dir}/{_}") sourceDirs)
+        , Pair "dependencies" (JArray Nil)
+        , Pair "classpath" $ (scalaLib, ivyDeps) | coursierFetch | map JString | JArray
+        , Pair "out" (JString myDir)
+        , Pair "classesDir" (JString "{myDir}/classes")
+        , Pair "scala" (bloopScalaLibJSON version)
+        , Nil
+      #JObject (jname, jdir, jsources, jdeps, jcp, jout, jclasses, jscala, Nil)
+      JObject fields
+  def bloop = Pair "version" (JString bloopVersion)
+  def proj = Pair "project" project
+  JObject (bloop, proj, Nil)
+
+global def bloopConfig module =
+  def content = bloopScalaModuleJSON module | formatJSON
+  write 0664 (bloopConfigName module) content
+
+global def bloopConfigName module =
+  def name = module.getScalaModuleName
+  "{bloopDir.getPathName}/{name}.json"
+
+# TODO include Bloop configs and build dirs for dependencies
+global def runScalaModule module =
+  def config = bloopConfig module
+  config
+
+global def jack =
+  def json = JObject ((Pair "hi" (JString "bye")), Nil)
+  def res = formatJSON json
+  def _ = println res
+  res
+
 
 # Helpers for generating files with tabbing
 data Scope =
@@ -87,17 +193,4 @@ global def millFileContents = match _
       def xs = verStr, sourceScope, Nil
       Scope "object `{name}` extends ScalaModule \{" xs "\}"
     Scopes (imports, moduleScope, Nil) | scopeToLines | catWith "\n"
-
-global def buildDir module = "{root.getPathName}/{module.getScalaModuleName}"
-
-global def millFile2 module =
-  def fn = "{module.buildDir}/build.sc"
-  def contents = millFileContents module
-  # TODO make this not 0775
-  # See https://github.com/sifive/wake/issues/49
-  write 0775 fn contents
-
-global def jack =
-  makeSBTScalaModule "test-proj" "test-proj" "2.12.4"
-
 
