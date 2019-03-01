@@ -1,5 +1,7 @@
 
+# Important directories
 def root = mkdir 0775 ".scala-wake"
+def bloopDir = mkdir 0775 ".bloop"
 
 #global def coursierBin _ =
 #  def version = "1.1.0-M11-2"
@@ -77,33 +79,24 @@ global def scalaLibraryIvyDep version =
   IvyDep "org.scala-lang" "scala-library" (scalaVersionToString version)
 
 tuple ScalaModule =
-  global Name String
-  global RootDir String
+  global Name         String
+  global RootDir      String
   global ScalaVersion ScalaVersion
-  global IvyDeps List IvyDep
-  global SourceDirs List String
-  global ResourceDirs List String
+  global IvyDeps      List IvyDep
+  global Deps   List ScalaModule
+  SourceDirs_         List String
+  ResourceDirs        List String
+
+global def getScalaModuleSourceDirs = match _
+  ScalaModule _ dir _ _ _ sourceDirs _ =
+    map ("{dir}/{_}") sourceDirs
 
 # Should the source dirs be relative to root or incldue it?
 global def makeSBTScalaModule name dir version =
   def scalaVersion = makeScalaVersion version
   def sourceDirs = "src/main/scala", "src/main/java", Nil | map ("{dir}/{_}")
   def resourceDirs = "{dir}/src/main/resources", Nil
-  ScalaModule name dir scalaVersion Nil sourceDirs resourceDirs
-
-global def buildDir module = "{root.getPathName}/{module.getScalaModuleName}"
-
-global def millFile2 module =
-  def fn = "{module.buildDir}/build.sc"
-  def contents = millFileContents module
-  # TODO make this not 0775
-  # See https://github.com/sifive/wake/issues/49
-  write 0664 fn contents
-
-#global def scalaModuleToBloop = match _
-#  ScalaModule name dir version deps sources resources =
-
-global def bloopDir = mkdir 0775 "{root.getPathName}/.bloop"
+  ScalaModule name dir scalaVersion Nil Nil sourceDirs resourceDirs
 
 # TODO implement scalacOptions
 global def bloopScalaLibJSON scalaVersion =
@@ -125,13 +118,17 @@ global def bloopScalaLibJSON scalaVersion =
     Pair "setup" (JObject fields)
   JObject (org, name, version, options, jars, setup, Nil)
 
+#def buildDir module = "{root.getPathName}/{module.getScalaModuleName}"
+def bloopOutDir module = "{bloopDir.getPathName}/{module.getScalaModuleName}"
+def bloopClassesDir module = "{root.getPathName}/{module.getScalaModuleName}/classes"
+
 # TODO
 # - implement module dependencies (see jdeps)
 global def bloopScalaModuleJSON scalaModule =
   def bloopVersion = "1.2.5"
   def project = match scalaModule
-    ScalaModule name dir version ivyDeps sourceDirs resourceDirs =
-      def myDir = "{bloopDir.getPathName}/name"
+    ScalaModule name dir version ivyDeps modDeps sourceDirs resourceDirs =
+      def myDir = bloopOutDir scalaModule
       def scalaLib = scalaLibraryIvyDep version
       def fields =
         Pair   "name" (JString name)
@@ -139,8 +136,8 @@ global def bloopScalaModuleJSON scalaModule =
         , Pair "sources" (JArray $ map (JString "{dir}/{_}") sourceDirs)
         , Pair "dependencies" (JArray Nil)
         , Pair "classpath" $ (scalaLib, ivyDeps) | coursierFetch | map JString | JArray
-        , Pair "out" (JString myDir)
-        , Pair "classesDir" (JString "{myDir}/classes")
+        , Pair "out" $ bloopOutDir scalaModule | JString
+        , Pair "classesDir" $ bloopClassesDir scalaModule | JString
         , Pair "scala" (bloopScalaLibJSON version)
         , Nil
       #JObject (jname, jdir, jsources, jdeps, jcp, jout, jclasses, jscala, Nil)
@@ -157,40 +154,37 @@ global def bloopConfigName module =
   def name = module.getScalaModuleName
   "{bloopDir.getPathName}/{name}.json"
 
-# TODO include Bloop configs and build dirs for dependencies
-global def runScalaModule module =
-  def config = bloopConfig module
-  config
+# TODO Delete me
+publish path = "/home/koenig/.bloop"
+
+# TODO
+# - Include Bloop configs and build dirs for dependencies
+# - Use local bloop
+# - Fix need for overriding outputs (why is it empty by default?)
+global def compileScalaModule module =
+  def config = module.bloopConfig
+  def outdir = mkdir 0775 module.bloopClassesDir
+  def statedir = makeStatePath module.bloopOutDir
+  def sourceFiles =
+    def dirs = module.getScalaModuleSourceDirs
+    map (sources _ '.*\.(scala|java)') dirs | flatten
+  def cmd = which "bloop", "run", module.getScalaModuleName, Nil
+  def visible = (config, outdir, statedir, sourceFiles)
+  def fnoutputs = match _
+    Nil = files outdir.getPathName '.*\.class'
+    other = raise "Outputs were non-empty as they should be! FIXME"
+  def plan =
+    #| setPlanFnOutputs fnoutputs
+    makePlan cmd visible
+  def job = plan.runJob
+  def _ = format plan | println
+  Pair (Pair job.getJobStdout job.getJobOutputs) job.getJobInputs
 
 global def jack =
-  def json = JObject ((Pair "hi" (JString "bye")), Nil)
-  def res = formatJSON json
-  def _ = println res
-  res
-
-
-# Helpers for generating files with tabbing
-data Scope =
-  Line String
-  Scope String (List Scope) String
-  Scopes (List Scope)
-
-global def scopeToLines = match _
-  Line s = s, Nil
-  Scope pre scopes post =
-    def scopesx = map scopeToLines scopes | flatten | map ("  {_}")
-    (pre, scopesx) ++ (post, Nil)
-  Scopes scopes = map scopeToLines scopes | flatten
-
-global def millFileContents = match _
-  ScalaModule name dir version deps sources resources =
-    def imports = Line "import mill._, scalalib._\nimport ammonite.ops._\n"
-    def verStr = Line "def scalaVersion = \"{version.scalaVersionToString}\""
-    def sourceScope =
-      def xs = map (Line "os.pwd / up / up / \"{name}\" / RelPath(\"{_}\"),") sources
-      Scope "def sources = T.sources(" xs ")"
-    def moduleScope =
-      def xs = verStr, sourceScope, Nil
-      Scope "object `{name}` extends ScalaModule \{" xs "\}"
-    Scopes (imports, moduleScope, Nil) | scopeToLines | catWith "\n"
+  def fields =
+    Pair "name" (JString "Jack Koenig")
+    , Pair "age"  (JInteger 27)
+    , Pair "extra" (JArray (JString "one", JString "two", Nil))
+    , Nil
+  JObject fields #| prettyJSON
 
