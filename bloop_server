@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+
+# Intended for use by wake to launch a bloop build server with a timeout
+
+import os
+import sys
+import time
+import subprocess
+import common
+
+my_dir = os.path.dirname(os.path.realpath(__file__))
+my_name = os.path.basename(__file__)
+
+def launch_timeout():
+    cmd = [common.timeout_executable()]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    # Wait until we get signal from subprocess that it has successfully written
+    # the pid file. Child indicates it has done something by printing to stdout
+    proc.stdout.read(1)
+
+def is_bloop_running():
+    #proc = subprocess.run([common.bloop_launcher()], capture_output=True)
+    proc = subprocess.run([common.bloop_executable(), "about"])
+    return proc.returncode == 0
+
+# FIXME Can we verify that *we* successfully launched it?
+# Maybe compare the PID of our launched daemon and the actual PID?
+#  ^ This probably won't work because we're using blp-server
+def launch_bloop():
+    """
+    Launches bloop and then waits until it is running
+    """
+    cmd = ["sh", common.bloop_launcher()] # FIXME why is "sh" necessary?
+    # TODO can we send stdout/err to /dev/null?
+    proc = subprocess.Popen(cmd)
+    while not is_bloop_running():
+        # FIXME better wait amount?
+        time.sleep(0.5)
+
+
+# TODO Check this algorithm and if it's properly threadsafe
+if __name__ == "__main__":
+    bloop_timeout = "{}/bloop_timeout".format(my_dir)
+
+    launched_timeout = False
+    if os.path.isfile(common.pid_file()):
+        print("Early: PID exists so launch timeout")
+        launch_timeout()
+        launched_timeout = True
+
+    if is_bloop_running():
+        print("Bloop is already running!")
+        # Do we need to do this again?
+        if os.path.isfile(common.pid_file()) and not launched_timeout:
+            print("PID file now exists so launching timeout!")
+            launch_timeout()
+            launched_timeout = True
+    else:
+        print("Bloop is not running, launching bloop!")
+        launch_bloop()
+        if not launched_timeout:
+            print("Launching timeout!")
+            launch_timeout()
+            launched_timeout = True
+        else:
+            print("Rare case of having already launched timeout but also launching bloop!")
+
