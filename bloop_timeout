@@ -1,30 +1,23 @@
-#!/usr/bin/env python3
+#!/usr/bin/env bash
+# Daemon process to close the bloop server after a timeout
+# Launching additional instances of this script will reset the timeout
 
-import os
-import sys
-import time
-import subprocess
-import common
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+PID_FILE=".bloop_timeout.pid"
+BLOOP_EXE=$DIR/../bin/bloop
+TIMEOUT=10
+PID=$$
 
-my_dir = os.path.dirname(os.path.realpath(__file__))
-my_name = os.path.basename(__file__)
+echo $PID > $PID_FILE
 
-TIMEOUT = 600
+# Become a proper daemon, close stdout and stderr
+exec 1>&-
+exec 2>&-
+sleep $TIMEOUT
 
-if __name__ == "__main__":
-    pid = str(os.getpid())
-
-    with open(common.pid_file(), 'w') as f:
-        f.write(pid)
-    # Let launcher know that I've successfully written the pid file
-    print("D") # D for done
-    sys.stdout.flush()
-
-    time.sleep(TIMEOUT)
-    with open(common.pid_file(), 'r') as f:
-        newpid = f.read()
-        if newpid == pid:
-            cmd = [common.bloop_executable(), "ng-stop"]
-            subprocess.run(cmd)
-            os.unlink(common.pid_file())
+NEW_PID=`cat $PID_FILE`
+if [ $NEW_PID -eq $PID ]; then
+  $BLOOP_EXE ng-stop
+  rm $PID_FILE
+fi
 

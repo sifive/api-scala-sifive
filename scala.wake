@@ -2,6 +2,7 @@
 # Important directories
 def root = mkdir 0775 ".scala-wake"
 def bloopDir = mkdir 0775 ".bloop"
+def bloopInstall = mkdir 0775 "bin"
 
 #global def coursierBin _ =
 #  def version = "1.1.0-M11-2"
@@ -11,13 +12,33 @@ def bloopDir = mkdir 0775 ".bloop"
 #  def doit = job cmd (dir, getter, Nil)
 #  doit.getJobOutput
 
-# Should be installed by wake
+# Should be installed by wit
 global def coursierBin =
-  def version = "1.1.0-M11-2"
-  def bin = files "{root.getPathName}/bin" ".*coursier.*"
-  bin | head | makeStatePath
+  #def bins = files "{root.getPathName}/bin" ".*coursier.*"
+  # FIXME Using the one from manually downloaded bloop
+  def bins = files bloopInstall.getPathName ".*coursier.*"
+  def bin = bins | head | makeStatePath
+  try (\_ raise "coursier not found!") bin
 
-global def ivyCache = mkdir 0775 "{root.getPathName}/cache"
+# TODO kind of ugly
+global def bloopExe _ =
+  def launcher = sources here "bloop_server" | head
+  def timeout = sources here "bloop_timeout" | head
+  def common = sources here "common.py" | head
+  def other = files bloopInstall.getPathName '.*'
+  def cmd = launcher.getPathName, Nil
+  def visible = launcher, timeout, common, (map makeStatePath other)
+  #def doit = job cmd visible
+  #def _ = println "[stdout] {doit.getJobStdout}"
+  #def _ = println "[stderr] {doit.getJobStderr}"
+  #if doit.getJobStatus == 0 then "bloop" else raise "Error! Unable to launch bloop!"
+  def doit = makeManualPlan cmd visible (\_ Nil) | runJob
+  def _ = println "[stdout] {doit.getJobStdout}"
+  def _ = println "[stderr] {doit.getJobStderr}"
+  if doit.getJobStatus == 0 then "bloop" else raise "Error! Unable to launch bloop!"
+
+#global def ivyCache = mkdir 0775 "{root.getPathName}/cache"
+global def ivyCache = mkdir 0775 "./coursier"
 
 global def millBin _ =
   def version = "0.3.5"
@@ -32,9 +53,13 @@ global def millBin _ =
 # Given List IvyDep, returns List String
 # Return is paths to jars of the input IvyDeps and their transitive dependencies
 global def coursierFetch deps =
+  def _ = println "[deps] {format deps}"
   def depStrs = map ivyDepToCoursier deps
+  def _ = println "[depStrs] {format depStrs}"
   def cachedDeps = files ivyCache.getPathName '.*' | map makeStatePath
+  def _ = println "[cachedDeps] {format cachedDeps}"
   def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, "-m", "offline", depStrs
+  def _ = println "[cmd] {format cmd}"
   def doit = job cmd (coursierBin, cachedDeps)
   if doit.getJobStatus == 0 then
     doit.getJobStdout | tokenize '\n' | filter ("{_}x" !=~ "x") # filter non-empty
@@ -83,7 +108,7 @@ tuple ScalaModule =
   global RootDir      String
   global ScalaVersion ScalaVersion
   global IvyDeps      List IvyDep
-  global Deps   List ScalaModule
+  global Deps         List ScalaModule
   SourceDirs_         List String
   ResourceDirs        List String
 
@@ -180,11 +205,8 @@ global def compileScalaModule module =
   def _ = format plan | println
   Pair (Pair job.getJobStdout job.getJobOutputs) job.getJobInputs
 
-global def jack =
-  def fields =
-    Pair "name" (JString "Jack Koenig")
-    , Pair "age"  (JInteger 27)
-    , Pair "extra" (JArray (JString "one", JString "two", Nil))
-    , Nil
-  JObject fields #| prettyJSON
-
+global def jack _ = match foo
+  ScalaModule name dir version ivyDeps modDeps sourceDirs resourceDirs =
+    def scalaLib = scalaLibraryIvyDep version
+    #Pair "classpath" $ (scalaLib, ivyDeps) | coursierFetch | map JString | JArray
+    (scalaLib, ivyDeps) | coursierFetch
