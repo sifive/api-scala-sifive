@@ -3,6 +3,7 @@
 def root = mkdir 0775 ".scala-wake"
 def bloopDir = mkdir 0775 ".bloop"
 def bloopInstall = mkdir 0775 "bin"
+global def ivyCache = mkdir 0775 "{root.getPathName}/cache"
 
 #global def coursierBin _ =
 #  def version = "1.1.0-M11-2"
@@ -20,26 +21,6 @@ global def coursierBin =
   def bin = bins | head | makeStatePath
   try (\_ raise "coursier not found!") bin
 
-# TODO kind of ugly
-global def bloopExe _ =
-  def launcher = sources here "bloop_server" | head
-  def timeout = sources here "bloop_timeout" | head
-  def common = sources here "common.py" | head
-  def other = files bloopInstall.getPathName '.*'
-  def cmd = launcher.getPathName, Nil
-  def visible = launcher, timeout, common, (map makeStatePath other)
-  #def doit = job cmd visible
-  #def _ = println "[stdout] {doit.getJobStdout}"
-  #def _ = println "[stderr] {doit.getJobStderr}"
-  #if doit.getJobStatus == 0 then "bloop" else raise "Error! Unable to launch bloop!"
-  def doit = makeManualPlan cmd visible (\_ Nil) | runJob
-  def _ = println "[stdout] {doit.getJobStdout}"
-  def _ = println "[stderr] {doit.getJobStderr}"
-  if doit.getJobStatus == 0 then "bloop" else raise "Error! Unable to launch bloop!"
-
-#global def ivyCache = mkdir 0775 "{root.getPathName}/cache"
-global def ivyCache = mkdir 0775 "./coursier"
-
 global def millBin _ =
   def version = "0.3.5"
   def dir = mkdir 0775 "{root.getPathName}/bin"
@@ -48,18 +29,34 @@ global def millBin _ =
   def doit = job cmd (getter, dir, Nil)
   doit.getJobOutput
 
+
+# TODO Do this right
+# This should be installed by wit
+global def bloopBin = "{bloopInstall.getPathName}/bloop"
+
+# TODO kind of ugly
+global def bloopExe _ =
+  def launcher = sources here "bloop_server" | head
+  def timeout = sources here "bloop_timeout" | head
+  def common = sources here "common.py" | head
+  def other = files bloopInstall.getPathName '.*'
+  def cmd = launcher.getPathName, Nil
+  def visible = launcher, timeout, common, (map makeStatePath other)
+  def doit =
+    makeManualPlan cmd visible (\_ Nil)
+    | setPlanKeep False # Always rerun to make sure we have a running bloop server
+    | runJob
+  if doit.getJobStatus == 0 then bloopBin else raise "Error! Unable to launch bloop!"
+
+
 # TODO
 # - Rename?
 # Given List IvyDep, returns List String
 # Return is paths to jars of the input IvyDeps and their transitive dependencies
 global def coursierFetch deps =
-  def _ = println "[deps] {format deps}"
   def depStrs = map ivyDepToCoursier deps
-  def _ = println "[depStrs] {format depStrs}"
   def cachedDeps = files ivyCache.getPathName '.*' | map makeStatePath
-  def _ = println "[cachedDeps] {format cachedDeps}"
   def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, "-m", "offline", depStrs
-  def _ = println "[cmd] {format cmd}"
   def doit = job cmd (coursierBin, cachedDeps)
   if doit.getJobStatus == 0 then
     doit.getJobStdout | tokenize '\n' | filter ("{_}x" !=~ "x") # filter non-empty
@@ -193,7 +190,7 @@ global def compileScalaModule module =
   def sourceFiles =
     def dirs = module.getScalaModuleSourceDirs
     map (sources _ '.*\.(scala|java)') dirs | flatten
-  def cmd = which "bloop", "run", module.getScalaModuleName, Nil
+  def cmd = (bloopExe Unit), "run", module.getScalaModuleName, Nil
   def visible = (config, outdir, statedir, sourceFiles)
   def fnoutputs = match _
     Nil = files outdir.getPathName '.*\.class'
