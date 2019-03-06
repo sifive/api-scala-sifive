@@ -32,15 +32,17 @@ global def millBin _ =
 
 # TODO Do this right
 # This should be installed by wit
-global def bloopBin = "{bloopInstall.getPathName}/bloop"
+global def bloopBin = makeStatePath "{bloopInstall.getPathName}/bloop"
 
 # TODO kind of ugly
 global def bloopExe _ =
   def launcher = sources here "bloop_server" | head
   def timeout = sources here "bloop_timeout" | head
   def common = sources here "common.py" | head
+  def pidfile = files here '.*\.pid' | head | makeStatePath
   def other = files bloopInstall.getPathName '.*'
   def cmd = launcher.getPathName, Nil
+  #def visible = pidfile, launcher, timeout, common, (map makeStatePath other)
   def visible = launcher, timeout, common, (map makeStatePath other)
   def doit =
     makeManualPlan cmd visible (\_ Nil)
@@ -51,12 +53,14 @@ global def bloopExe _ =
 
 # TODO
 # - Rename?
+# - Re-enable `-m offline`
 # Given List IvyDep, returns List String
 # Return is paths to jars of the input IvyDeps and their transitive dependencies
 global def coursierFetch deps =
   def depStrs = map ivyDepToCoursier deps
   def cachedDeps = files ivyCache.getPathName '.*' | map makeStatePath
-  def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, "-m", "offline", depStrs
+  #def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, "-m", "offline", depStrs
+  def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, depStrs
   def doit = job cmd (coursierBin, cachedDeps)
   if doit.getJobStatus == 0 then
     doit.getJobStdout | tokenize '\n' | filter ("{_}x" !=~ "x") # filter non-empty
@@ -83,7 +87,7 @@ tuple IvyDep =
   global Name String
   global Rev String
 
-global def makeScalaIvyDep string scalaVersion =
+global def makeScalaIvyDep scalaVersion string =
   def err = raise "Malformed Scala Ivy Dep '{string}'"
   match (tokenize ':' string)
     org, name, rev, Nil = IvyDep org name rev
@@ -91,6 +95,11 @@ global def makeScalaIvyDep string scalaVersion =
       def namex = "{name}_2.{str(scalaVersion.getScalaVersionMajor)}"
       if "{blank}x" ==~ "x" then IvyDep org namex rev else err
     _ = err
+
+global def makeJavaIvyDep string =
+  match (tokenize ':' string)
+    org, name, rev, Nil = IvyDep org name rev
+    _ = raise "Malformed Java Ivy Dep '{string}'"
 
 def ivyDepToCoursier = match _
   IvyDep org name rev = "{org}:{name}:{rev}"
@@ -152,14 +161,16 @@ global def bloopScalaModuleJSON scalaModule =
     ScalaModule name dir version ivyDeps modDeps sourceDirs resourceDirs =
       def myDir = bloopOutDir scalaModule
       def scalaLib = scalaLibraryIvyDep version
+      def ivyClasspath = (scalaLib, ivyDeps) | coursierFetch
+      def depClasspath = modDeps | map bloopClassesDir
       def fields =
         Pair   "name" (JString name)
         , Pair "directory" (JString dir)
-        , Pair "sources" (JArray $ map (JString "{dir}/{_}") sourceDirs)
-        , Pair "dependencies" (JArray Nil)
-        , Pair "classpath" $ (scalaLib, ivyDeps) | coursierFetch | map JString | JArray
-        , Pair "out" $ bloopOutDir scalaModule | JString
-        , Pair "classesDir" $ bloopClassesDir scalaModule | JString
+        , Pair "sources" (JArray (map (JString "{dir}/{_}") sourceDirs))
+        , Pair "dependencies" (JArray (map getScalaModuleName modDeps | map JString))
+        , Pair "classpath" (ivyClasspath ++ depClasspath | map JString | JArray)
+        , Pair "out" (bloopOutDir scalaModule | JString)
+        , Pair "classesDir" (bloopClassesDir scalaModule | JString)
         , Pair "scala" (bloopScalaLibJSON version)
         , Nil
       #JObject (jname, jdir, jsources, jdeps, jcp, jout, jclasses, jscala, Nil)
@@ -168,39 +179,44 @@ global def bloopScalaModuleJSON scalaModule =
   def proj = Pair "project" project
   JObject (bloop, proj, Nil)
 
-global def bloopConfig module =
-  def content = bloopScalaModuleJSON module | formatJSON
+global def bloopConfig module = memoize 0 (
+  def content = bloopScalaModuleJSON module | prettyJSON
   write 0664 (bloopConfigName module) content
+)
 
 global def bloopConfigName module =
   def name = module.getScalaModuleName
   "{bloopDir.getPathName}/{name}.json"
 
-# TODO Delete me
-publish path = "/home/koenig/.bloop"
-
 # TODO
+# - Include ivy and transitive ivy deps in visible files
 # - Include Bloop configs and build dirs for dependencies
 # - Use local bloop
-# - Fix need for overriding outputs (why is it empty by default?)
-global def compileScalaModule module =
+# - Should the bloop invocation be a regular plan or a manual plan?
+#   - Value in regular plan is it can tell me if I'm missing input files
+#   - We have to set inputs and outputs anyway
+global def compileScalaModule  module =
   def config = module.bloopConfig
   def outdir = mkdir 0775 module.bloopClassesDir
-  def statedir = makeStatePath module.bloopOutDir
-  def sourceFiles =
-    def dirs = module.getScalaModuleSourceDirs
-    map (sources _ '.*\.(scala|java)') dirs | flatten
-  def cmd = (bloopExe Unit), "run", module.getScalaModuleName, Nil
-  def visible = (config, outdir, statedir, sourceFiles)
-  def fnoutputs = match _
-    Nil = files outdir.getPathName '.*\.class'
-    other = raise "Outputs were non-empty as they should be! FIXME"
+  def statedir = mkdir 0775 module.bloopOutDir
+  def bin = bloopExe Unit
+  def modDeps = module.getScalaModuleDeps
+  def allInputs =
+    def sourceFiles =
+      def dirs = module.getScalaModuleSourceDirs
+      map (sources _ '.*\.(scala|java)') dirs | flatten
+    def depClassFiles =
+      map compileScalaModule modDeps | flatten
+    sourceFiles ++ depClassFiles
+  def depConfigFiles =
+    map bloopConfig modDeps
+  def cmd = bin.getPathName, "compile", module.getScalaModuleName, Nil
+  def visible = (bin, config, outdir, statedir, depConfigFiles)
   def plan =
-    #| setPlanFnOutputs fnoutputs
     makePlan cmd visible
-  def job = plan.runJob
-  def _ = format plan | println
-  Pair (Pair job.getJobStdout job.getJobOutputs) job.getJobInputs
+    | setPlanFnOutputs (\_ files outdir.getPathName '.*\.class')
+    | setPlanFnInputs (\_ allInputs | map getPathName)
+  plan.runJob.getJobOutputs
 
 global def jack _ = match foo
   ScalaModule name dir version ivyDeps modDeps sourceDirs resourceDirs =
