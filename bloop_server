@@ -31,7 +31,7 @@ def launch_bloop():
     Launches bloop and then waits until it is running
     """
     cmd = ["sh", common.bloop_launcher()] # FIXME why is "sh" necessary?
-    # Use parent PATH and override TERM to suppress
+    # Use parent PATH and override TERM to suppress annoying
     #  "tput: No value for $TERM and no -T specified"
     env = { "PATH": os.environ["PATH"], "TERM": "dumb" }
     # TODO can we send stdout/err to /dev/null?
@@ -48,24 +48,21 @@ if __name__ == "__main__":
 
     launched_timeout = False
     if os.path.isfile(common.pid_file()):
-        print("Early: PID exists so launch timeout")
         launch_timeout()
         launched_timeout = True
 
     if is_bloop_running():
-        print("Bloop is already running!")
+        print("[{}] Bloop is already running!".format(my_name))
         # Do we need to do this again?
-        if os.path.isfile(common.pid_file()) and not launched_timeout:
-            print("PID file now exists so launching timeout!")
+        if not launched_timeout and os.path.isfile(common.pid_file()):
             launch_timeout()
             launched_timeout = True
     else:
-        print("Bloop is not running, launching bloop!")
+        print("[{}] Launching Bloop!".format(my_name))
         launch_bloop()
         if not launched_timeout:
-            print("Launching timeout!")
             launch_timeout()
             launched_timeout = True
-        else:
-            print("Rare case of having already launched timeout but also launching bloop!")
 
+    if launched_timeout:
+        print("[{}] We are managing the bloop server".format(my_name))

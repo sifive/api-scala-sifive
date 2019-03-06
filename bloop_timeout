@@ -3,9 +3,9 @@
 # Launching additional instances of this script will reset the timeout
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-PID_FILE=".bloop_timeout.pid"
+PID_FILE=$DIR/.bloop_timeout.pid
 BLOOP_EXE=$DIR/../bin/bloop
-TIMEOUT=10
+TIMEOUT=600
 PID=$$
 
 echo $PID > $PID_FILE
