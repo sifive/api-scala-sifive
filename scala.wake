@@ -2,14 +2,14 @@
 # Important directories
 def root = mkdir "build/{here}"
 def bloopDir = mkdir "{root.getPathName}/bloop"
-def bloopInstall = mkdir "bin"
+def bloopInstall = mkdir "scala"
 def ivyCache = mkdir "ivycache"
 
 # Make a virtual job that has the ivyCache files as outputs
 # It's kind of a stand in for wit
 # Virtual job
 # virtual runner, keep false, fnoutputs are ivycache files
-global def ivyCacheDeps _ =
+def ivyCacheDeps _ =
   def fs = files ivyCache.getPathName '.*'
   makePlan ("<ivycache>", ivyCache.getPathName, Nil) Nil
   | setPlanRunner    virtualRunner
@@ -18,37 +18,39 @@ global def ivyCacheDeps _ =
   | runJob
   | getJobOutputs
 
-#global def coursierBin _ =
-#  def version = "1.1.0-M11-2"
-#  def dir = mkdir "{root.getPathName}/bin"
-#  def getter = sources here 'getCoursier\.sh' | head
-#  def cmd = getter.getPathName, dir.getPathName, version, Nil
-#  def doit = job cmd (dir, getter, Nil)
-#  doit.getJobOutput
+global def readIvyDeps dir =
+  def fn = "ivydependencies.json"
+  def file = match (sources dir fn)
+    one, Nil = one
+    Nil      = raise "No {fn} found in {dir}!"
+    multi    = raise "Multiple {fn} found: {format multi}"
+  def json = parseJSONFile file.getPathName
+  def version = match (json // "scalaVersion")
+    JArray (JString str, Nil) = makeScalaVersion str
+    JArray multi = raise "Multiple Scala versions found in {format file}!"
+    _            = raise "Scala version not found in {format file}!"
+  def extract = match _
+    JString h, t = h, extract t
+    Nil          = Nil
+    x            = raise "Unexpected non-String dependency {format x}"
+  def deps = match (json // "dependencies")
+    JArray l = extract l
+    x        = raise "Unexpected non-array dependencies {format x}"
+  def ivyDeps = map (makeScalaIvyDep version _) deps
+  Pair version ivyDeps
 
 # Should be installed by wit
-global def coursierBin =
-  #def bins = files "{root.getPathName}/bin" ".*coursier.*"
-  # FIXME Using the one from manually downloaded bloop
+def coursierBin =
   def bins = files bloopInstall.getPathName '.*coursier.*'
   def bin = bins | head | makeStatePath
   try (\_ raise "coursier not found!") bin
 
-global def millBin _ =
-  def version = "0.3.5"
-  def dir = mkdir "{root.getPathName}/bin"
-  def getter = sources here 'getMill\.sh' | head
-  def cmd = getter.getPathName, dir.getPathName, version, Nil
-  def doit = job cmd (getter, dir, Nil)
-  doit.getJobOutput
-
-
 # TODO Do this right
 # This should be installed by wit
-global def bloopBin = makeStatePath "{bloopInstall.getPathName}/bloop"
+def bloopBin = makeStatePath "{bloopInstall.getPathName}/bloop"
 
 # TODO kind of ugly
-global def bloopExe _ =
+def bloopExe _ =
   def launcher = sources here "bloop_server" | head
   def timeout = sources here "bloop_timeout" | head
   def common = sources here "common.py" | head
@@ -69,12 +71,11 @@ global def bloopExe _ =
 # Given List IvyDep, returns List String
 # Return is paths to jars of the input IvyDeps and their transitive dependencies
 global def coursierFetch deps =
-  def depStrs = map ivyDepToCoursier deps
+  def depStrs = map getIvyDepString deps
   def cachedDeps = ivyCacheDeps Unit
   def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, "-m", "offline", depStrs
   #def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, depStrs
   def plan = makeManualPlan cmd (coursierBin, cachedDeps) (\_ Nil)
-  def _ = println $ format plan
   #def plan = makePlan cmd (coursierBin, cachedDeps)
   def job = plan.runJob
   if job.getJobStatus == 0 then
@@ -131,7 +132,7 @@ global def makeJavaIvyDep string =
     org, name, rev, Nil = IvyDep org name rev
     _ = raise "Malformed Java Ivy Dep '{string}'"
 
-def ivyDepToCoursier = match _
+global def getIvyDepString = match _
   IvyDep org name rev = "{org}:{name}:{rev}"
 
 global def scalaCompilerIvyDep version =
@@ -167,7 +168,7 @@ global def makeSBTScalaModule name dir version =
   ScalaModule name dir scalaVersion Nil Nil sourceDirs resourceDirs Nil
 
 # TODO implement scalacOptions
-global def bloopScalaLibJSON scalaVersion =
+def bloopScalaLibJSON scalaVersion =
   def ivyDep = scalaCompilerIvyDep scalaVersion
   def org = Pair "organization" (JString ivyDep.getIvyDepOrg)
   def name = Pair "name" (JString ivyDep.getIvyDepName)
@@ -192,7 +193,7 @@ def bloopClassesDir module = "{root.getPathName}/{module.getScalaModuleName}/cla
 
 # TODO
 # - implement module dependencies (see jdeps)
-global def bloopScalaModuleJSON scalaModule =
+def bloopScalaModuleJSON scalaModule =
   def bloopVersion = "1.2.5"
   def project = match scalaModule
     ScalaModule name dir version ivyDeps modDeps sourceDirs resourceDirs genSrcs =
@@ -217,12 +218,12 @@ global def bloopScalaModuleJSON scalaModule =
   def proj = Pair "project" project
   JObject (bloop, proj, Nil)
 
-global def bloopConfig module = memoize 0 (
+def bloopConfig module = memoize 0 (
   def content = bloopScalaModuleJSON module | prettyJSON
   write (bloopConfigName module) content
 )
 
-global def bloopConfigName module =
+def bloopConfigName module =
   def name = module.getScalaModuleName
   "{bloopDir.getPathName}/{name}.json"
 
@@ -230,9 +231,6 @@ global def bloopConfigName module =
 # - Include ivy and transitive ivy deps in visible files
 # - Include Bloop configs and build dirs for dependencies
 # - Use local bloop
-# - Should the bloop invocation be a regular plan or a manual plan?
-#   - Value in regular plan is it can tell me if I'm missing input files
-#   - We have to set inputs and outputs anyway
 global def compileScalaModule  module =
   def config = module.bloopConfig
   def outdir = mkdir module.bloopClassesDir

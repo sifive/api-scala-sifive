@@ -4,7 +4,7 @@
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 PID_FILE=$DIR/.bloop_timeout.pid
-BLOOP_EXE=$DIR/../bin/bloop
+BLOOP_EXE=$DIR/../scala/bloop
 TIMEOUT=600
 PID=$$
 

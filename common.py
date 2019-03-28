@@ -12,11 +12,11 @@ def pid_file():
 
 # FIXME - use actual install
 def bloop_executable():
-    return "{}/../bin/bloop".format(directory())
+    return "{}/../scala/bloop".format(directory())
 
 # FIXME - use actual install
 def bloop_launcher():
-    return "{}/../bin/blp-server".format(directory())
+    return "{}/../scala/blp-server".format(directory())
 
 # TODO, can we get this directly from bloop_timeout itself?
 def timeout_executable():
