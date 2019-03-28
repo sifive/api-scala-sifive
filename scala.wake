@@ -1,13 +1,26 @@
 
 # Important directories
-def root = mkdir 0775 ".scala-wake"
-def bloopDir = mkdir 0775 ".bloop"
-def bloopInstall = mkdir 0775 "bin"
-global def ivyCache = mkdir 0775 "{root.getPathName}/cache"
+def root = mkdir "build/{here}"
+def bloopDir = mkdir "{root.getPathName}/bloop"
+def bloopInstall = mkdir "bin"
+def ivyCache = mkdir "ivycache"
+
+# Make a virtual job that has the ivyCache files as outputs
+# It's kind of a stand in for wit
+# Virtual job
+# virtual runner, keep false, fnoutputs are ivycache files
+global def ivyCacheDeps _ =
+  def fs = files ivyCache.getPathName '.*'
+  makePlan ("<ivycache>", ivyCache.getPathName, Nil) Nil
+  | setPlanRunner    virtualRunner
+  | setPlanKeep      False
+  | setPlanFnOutputs (\_ fs)
+  | runJob
+  | getJobOutputs
 
 #global def coursierBin _ =
 #  def version = "1.1.0-M11-2"
-#  def dir = mkdir 0775 "{root.getPathName}/bin"
+#  def dir = mkdir "{root.getPathName}/bin"
 #  def getter = sources here 'getCoursier\.sh' | head
 #  def cmd = getter.getPathName, dir.getPathName, version, Nil
 #  def doit = job cmd (dir, getter, Nil)
@@ -17,13 +30,13 @@ global def ivyCache = mkdir 0775 "{root.getPathName}/cache"
 global def coursierBin =
   #def bins = files "{root.getPathName}/bin" ".*coursier.*"
   # FIXME Using the one from manually downloaded bloop
-  def bins = files bloopInstall.getPathName ".*coursier.*"
+  def bins = files bloopInstall.getPathName '.*coursier.*'
   def bin = bins | head | makeStatePath
   try (\_ raise "coursier not found!") bin
 
 global def millBin _ =
   def version = "0.3.5"
-  def dir = mkdir 0775 "{root.getPathName}/bin"
+  def dir = mkdir "{root.getPathName}/bin"
   def getter = sources here 'getMill\.sh' | head
   def cmd = getter.getPathName, dir.getPathName, version, Nil
   def doit = job cmd (getter, dir, Nil)
@@ -50,21 +63,38 @@ global def bloopExe _ =
     | runJob
   if doit.getJobStatus == 0 then bloopBin else raise "Error! Unable to launch bloop!"
 
-
 # TODO
 # - Rename?
-# - Re-enable `-m offline`
+# - Can we make this a fuse job? For some reason coursier can't find visible inputs
 # Given List IvyDep, returns List String
 # Return is paths to jars of the input IvyDeps and their transitive dependencies
 global def coursierFetch deps =
   def depStrs = map ivyDepToCoursier deps
-  def cachedDeps = files ivyCache.getPathName '.*' | map makeStatePath
-  #def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, "-m", "offline", depStrs
-  def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, depStrs
-  def doit = job cmd (coursierBin, cachedDeps)
-  if doit.getJobStatus == 0 then
-    doit.getJobStdout | tokenize '\n' | filter ("{_}x" !=~ "x") # filter non-empty
+  def cachedDeps = ivyCacheDeps Unit
+  def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, "-m", "offline", depStrs
+  #def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, depStrs
+  def plan = makeManualPlan cmd (coursierBin, cachedDeps) (\_ Nil)
+  def _ = println $ format plan
+  #def plan = makePlan cmd (coursierBin, cachedDeps)
+  def job = plan.runJob
+  if job.getJobStatus == 0 then
+    def strs = job.getJobStdout | tokenize '\n' | filter (_ !=~ "")
+    def tree = ltree scmpRaw strs
+    filter (_.getPathName ∈ tree) cachedDeps
   else raise "Cannot resolve ivy dependencies, have you run `wit update` (currently unimplemented)?"
+
+# TODO improve
+global def runIvyDep dep = runJava (coursierFetch (dep, Nil))
+
+# TODO improve
+# - Customize java installation
+# - Add Java options (eg. -Xmx4G)
+# visible excludes classpath
+global def runJava classpath main args visible =
+  def java = which "java"
+  def cp = "-cp", (map getPathName classpath | catWith ":"), Nil
+  def cmd = java, cp ++ (main, args)
+  job cmd (visible ++ classpath)
 
 # TODO Dotty support?
 tuple ScalaVersion =
@@ -110,24 +140,31 @@ global def scalaLibraryIvyDep version =
   IvyDep "org.scala-lang" "scala-library" (scalaVersionToString version)
 
 tuple ScalaModule =
-  global Name         String
-  global RootDir      String
-  global ScalaVersion ScalaVersion
-  global IvyDeps      List IvyDep
-  global Deps         List ScalaModule
-  SourceDirs_         List String
-  ResourceDirs        List String
+  global Name             String
+  global RootDir          String
+  global ScalaVersion     ScalaVersion
+  global IvyDeps          List IvyDep
+  global Deps             List ScalaModule
+  SourceDirs_             List String
+  ResourceDirs            List String
+  global GeneratedSources List Path
 
 global def getScalaModuleSourceDirs = match _
-  ScalaModule _ dir _ _ _ sourceDirs _ =
+  ScalaModule _ dir _ _ _ sourceDirs _ _ =
     map ("{dir}/{_}") sourceDirs
+
+def genSourceDir name = mkdir "{root.getPathName}/generated-src"
+
+global def getScalaModuleGeneratedSourceDir = match _
+  ScalaModule name _ _ _ _ _ _ _ = genSourceDir name
 
 # Should the source dirs be relative to root or incldue it?
 global def makeSBTScalaModule name dir version =
   def scalaVersion = makeScalaVersion version
-  def sourceDirs = "src/main/scala", "src/main/java", Nil | map ("{dir}/{_}")
+  def sourceDirs =
+    "src/main/scala", "src/main/java", Nil | map ("{dir}/{_}")
   def resourceDirs = "{dir}/src/main/resources", Nil
-  ScalaModule name dir scalaVersion Nil Nil sourceDirs resourceDirs
+  ScalaModule name dir scalaVersion Nil Nil sourceDirs resourceDirs Nil
 
 # TODO implement scalacOptions
 global def bloopScalaLibJSON scalaVersion =
@@ -136,7 +173,7 @@ global def bloopScalaLibJSON scalaVersion =
   def name = Pair "name" (JString ivyDep.getIvyDepName)
   def version = Pair "version" (JString ivyDep.getIvyDepRev)
   def options = Pair "options" (JArray Nil)
-  def jars = Pair "jars" $ coursierFetch (ivyDep, Nil) | map JString | JArray
+  def jars = Pair "jars" $ coursierFetch (ivyDep, Nil) | map getPathName | map JString | JArray
   def setup =
     def fields =
       Pair "order" (JString "mixed")
@@ -158,15 +195,16 @@ def bloopClassesDir module = "{root.getPathName}/{module.getScalaModuleName}/cla
 global def bloopScalaModuleJSON scalaModule =
   def bloopVersion = "1.2.5"
   def project = match scalaModule
-    ScalaModule name dir version ivyDeps modDeps sourceDirs resourceDirs =
+    ScalaModule name dir version ivyDeps modDeps sourceDirs resourceDirs genSrcs =
       def myDir = bloopOutDir scalaModule
       def scalaLib = scalaLibraryIvyDep version
-      def ivyClasspath = (scalaLib, ivyDeps) | coursierFetch
+      def ivyClasspath = (scalaLib, ivyDeps) | coursierFetch | map getPathName
       def depClasspath = modDeps | map bloopClassesDir
+      def sources = (map ("{dir}/{_}") sourceDirs) ++ (map getPathName genSrcs)
       def fields =
         Pair   "name" (JString name)
         , Pair "directory" (JString dir)
-        , Pair "sources" (JArray (map (JString "{dir}/{_}") sourceDirs))
+        , Pair "sources" (JArray (map JString sources))
         , Pair "dependencies" (JArray (map getScalaModuleName modDeps | map JString))
         , Pair "classpath" (ivyClasspath ++ depClasspath | map JString | JArray)
         , Pair "out" (bloopOutDir scalaModule | JString)
@@ -181,7 +219,7 @@ global def bloopScalaModuleJSON scalaModule =
 
 global def bloopConfig module = memoize 0 (
   def content = bloopScalaModuleJSON module | prettyJSON
-  write 0664 (bloopConfigName module) content
+  write (bloopConfigName module) content
 )
 
 global def bloopConfigName module =
@@ -197,8 +235,8 @@ global def bloopConfigName module =
 #   - We have to set inputs and outputs anyway
 global def compileScalaModule  module =
   def config = module.bloopConfig
-  def outdir = mkdir 0775 module.bloopClassesDir
-  def statedir = mkdir 0775 module.bloopOutDir
+  def outdir = mkdir module.bloopClassesDir
+  def statedir = mkdir module.bloopOutDir
   def bin = bloopExe Unit
   def modDeps = module.getScalaModuleDeps
   def allInputs =
@@ -210,7 +248,7 @@ global def compileScalaModule  module =
     sourceFiles ++ depClassFiles
   def depConfigFiles =
     map bloopConfig modDeps
-  def cmd = bin.getPathName, "compile", module.getScalaModuleName, Nil
+  def cmd = bin.getPathName, "compile", "-c", bloopDir.getPathName, module.getScalaModuleName, Nil
   def visible = (bin, config, outdir, statedir, depConfigFiles)
   def plan =
     makePlan cmd visible
@@ -218,8 +256,3 @@ global def compileScalaModule  module =
     | setPlanFnInputs (\_ allInputs | map getPathName)
   plan.runJob.getJobOutputs
 
-global def jack _ = match foo
-  ScalaModule name dir version ivyDeps modDeps sourceDirs resourceDirs =
-    def scalaLib = scalaLibraryIvyDep version
-    #Pair "classpath" $ (scalaLib, ivyDeps) | coursierFetch | map JString | JArray
-    (scalaLib, ivyDeps) | coursierFetch
