@@ -85,13 +85,15 @@ def depsComp proj1 proj2 =
 #   for other tasks to depend on
 # TODO
 #  * Make more efficient by using ROOT of dependency tree(s)
-global def millFile = match allScalaProjects
-  Nil = None
-  projects =
-    def modules = map generateMillModule projects
-    def content = (catWith "\n" (millFilePrefix, modules))
-    def filename = simplify "./build.sc"
-    write 0664 filename content | Some
+global def millFile proj = memoize 0 (
+  match (proj, allScalaProjects)
+    Nil = None
+    projects =
+      def modules = map generateMillModule projects
+      def content = (catWith "\n" (millFilePrefix, modules))
+      def filename = simplify "./build.sc"
+      write 0664 filename content | Some
+)
 
 global def ivyCache = simplify "{here}/.coursier"
 global def millCache = simplify "{here}/.mill"
@@ -113,7 +115,7 @@ global def scalaProjectAssembly proj =
 # TODO What do we do about having to hash all of the ivy cache and files in out?
 global def millTask proj task args =
   def mill = millBin Unit
-  def buildFile = match millFile
+  def buildFile = match proj.millFile
     Some f = f
     None = raise "Cannot run millTask if there are no scala projects!"
   def outDir = simplify "./out/{project}/{task}"
