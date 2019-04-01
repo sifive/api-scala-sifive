@@ -1,7 +1,7 @@
 
 global def millBin _ =
   def version = "0.3.5"
-  def dir = mkdir 0775 (simplify "{here}/bin")
+  def dir = mkdir (simplify "{here}/bin")
   def getter = sources here 'getMill\.sh' | head
   def cmd = (getter.getPathName, version, Nil)
   def doit = job cmd (getter, dir, Nil)
@@ -19,7 +19,7 @@ global def simpleScalaProject name root deps = ScalaProject name root deps None
 
 # name, root directory, Scala project dependencies, mill file to import, mill trait to extend
 global def millScalaProject name root deps mfile mtrait =
-  ScalaProject name (mkdir 0775 root) deps (Some (MillBaseProject mfile mtrait))
+  ScalaProject name (mkdir root) deps (Some (MillBaseProject mfile mtrait))
 
 global def scalaProjectName = match _
   ScalaProject name _ _ _ = name
@@ -74,7 +74,7 @@ def millFilePrefix =
   catWith "\n" a
 
 def allScalaProjects =
-  subscribe scalaProjects ++ (subscribe scalaProjectLists).flatten
+  subscribe scalaProjects
   | sortBy (lt depsComp)
   | distinctBy (eq depsComp)
 
@@ -92,12 +92,12 @@ global def millFile proj = memoize 0 (
       def modules = map generateMillModule projects
       def content = (catWith "\n" (millFilePrefix, modules))
       def filename = simplify "./build.sc"
-      write 0664 filename content | Some
+      write filename content | Some
 )
 
 global def ivyCache = simplify "{here}/.coursier"
 global def millCache = simplify "{here}/.mill"
-publish environment = "COURSIER_CACHE={ivyCache}"
+publish environment = "COURSIER_CACHE={ivyCache}", Nil
 
 def millBaseCmd _ = (millBin Unit).getPathName, "-i", "--home", millCache, Nil
 
