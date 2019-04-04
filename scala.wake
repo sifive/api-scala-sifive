@@ -5,10 +5,7 @@ def bloopDir = mkdir "{root.getPathName}/bloop"
 def bloopInstall = mkdir "scala"
 def ivyCache = mkdir "ivycache"
 
-# Make a virtual job that has the ivyCache files as outputs
-# It's kind of a stand in for wit
-# Virtual job
-# virtual runner, keep false, fnoutputs are ivycache files
+# Virtual job that owns all fetched ivy dependencies
 def ivyCacheDeps _ =
   def fs = files ivyCache.getPathName '.*'
   makePlan ("<ivycache>", ivyCache.getPathName, Nil) Nil
@@ -19,25 +16,7 @@ def ivyCacheDeps _ =
   | getJobOutputs
 
 global def readIvyDeps dir =
-  def fn = "ivydependencies.json"
-  def file = match (sources dir fn)
-    one, Nil = one
-    Nil      = raise "No {fn} found in {dir}!"
-    multi    = raise "Multiple {fn} found: {format multi}"
-  def json = parseJSONFile file.getPathName
-  def version = match (json // "scalaVersion")
-    JArray (JString str, Nil) = makeScalaVersion str
-    JArray multi = raise "Multiple Scala versions found in {format file}!"
-    _            = raise "Scala version not found in {format file}!"
-  def extract = match _
-    JString h, t = h, extract t
-    Nil          = Nil
-    x            = raise "Unexpected non-String dependency {format x}"
-  def deps = match (json // "dependencies")
-    JArray l = extract l
-    x        = raise "Unexpected non-array dependencies {format x}"
-  def ivyDeps = map (makeScalaIvyDep version _) deps
-  Pair version ivyDeps
+  source "{dir}/ivydependencies.json" | getPathName | parseJSONFile
 
 # Should be installed by wit
 def coursierBin =
@@ -71,12 +50,13 @@ def bloopExe _ =
 # Given List IvyDep, returns List String
 # Return is paths to jars of the input IvyDeps and their transitive dependencies
 global def coursierFetch deps =
-  def depStrs = map getIvyDepString deps
+  def checkAndToString dep =
+    if dep.ivyDepIsResolved then ivyDepToString dep else raise "Unresolved IvyDep {format dep}!"
+  def depStrs = map checkAndToString deps
   def cachedDeps = ivyCacheDeps Unit
   def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, "-m", "offline", depStrs
   #def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, depStrs
   def plan = makeManualPlan cmd (coursierBin, cachedDeps) (\_ Nil)
-  #def plan = makePlan cmd (coursierBin, cachedDeps)
   def job = plan.runJob
   if job.getJobStatus == 0 then
     def strs = job.getJobStdout | tokenize '\n' | filter (_ !=~ "")
@@ -105,40 +85,54 @@ tuple ScalaVersion =
 def scalaVersionToString = match _
   ScalaVersion major minor = "2.{str(major)}.{str(minor)}"
 
+def scalaVersionMajorString = match _
+  ScalaVersion major _ = "2.{str(major)}"
+
 global def makeScalaVersion str =
-  def err = raise "Only Scala 2.X.Y accepted, got '{str}'"
   match (tokenize '\.' str)
-    majormajor, major, minor, Nil =
-      if majormajor ==~ "2" then ScalaVersion (int major) (int minor) else err
-    _ = err
+    "2", major, minor, Nil = ScalaVersion (int major) (int minor)
+    _ = raise "Only Scala 2.X.Y accepted, got '{str}'"
+
+data ScalaCrossVersion =
+  Constant
+  Major
+  Minor
 
 # TODO additional resolvers/repositories
+# Should the cross versions be factored out?
 tuple IvyDep =
   global Org String
   global Name String
   global Rev String
+  CrossVersion ScalaCrossVersion
 
-global def makeScalaIvyDep scalaVersion string =
-  def err = raise "Malformed Scala Ivy Dep '{string}'"
+global def parseIvyDep string =
   match (tokenize ':' string)
-    org, name, rev, Nil = IvyDep org name rev
-    org, blank, name, rev, Nil =
-      def namex = "{name}_2.{str(scalaVersion.getScalaVersionMajor)}"
-      if "{blank}x" ==~ "x" then IvyDep org namex rev else err
-    _ = err
+    org, name, rev, Nil         = IvyDep org name rev Constant
+    org, "", name, rev, Nil     = IvyDep org name rev Major
+    org, "", "", name, rev, Nil = IvyDep org name rev Minor
+    _                           = raise "Malformed Ivy Dep '{string}'"
 
-global def makeJavaIvyDep string =
-  match (tokenize ':' string)
-    org, name, rev, Nil = IvyDep org name rev
-    _ = raise "Malformed Java Ivy Dep '{string}'"
+global def ivyDepToString dep = match dep
+  IvyDep org name rev cross = match cross
+    Constant = "{org}:{name}:{rev}"
+    Major    = "{org}::{name}:{rev}"
+    Minor    = "{org}:::{name}:{rev}"
 
-global def getIvyDepString = match _
-  IvyDep org name rev = "{org}:{name}:{rev}"
+global def resolveIvyDep version dep = match dep
+  IvyDep org name rev cross = match cross
+    Constant = dep
+    Major    = IvyDep org "{name}_{scalaVersionMajorString version}" rev Constant
+    Minor    = IvyDep org "{name}_{scalaVersionToString version}" rev Constant
+
+global def ivyDepIsResolved dep = match dep.getIvyDepCrossVersion
+  Constant = True
+  _        = False
 
 global def scalaCompilerIvyDep version =
-  IvyDep "org.scala-lang" "scala-compiler" (scalaVersionToString version)
+  IvyDep "org.scala-lang" "scala-compiler" (scalaVersionToString version) Constant
 global def scalaLibraryIvyDep version =
-  IvyDep "org.scala-lang" "scala-library" (scalaVersionToString version)
+  IvyDep "org.scala-lang" "scala-library" (scalaVersionToString version) Constant
 
 tuple ScalaModule =
   global Name             String
@@ -146,6 +140,7 @@ tuple ScalaModule =
   global ScalaVersion     ScalaVersion
   global IvyDeps          List IvyDep
   global Deps             List ScalaModule
+  # These are relative to RootDir
   SourceDirs_             List String
   ResourceDirs            List String
   global GeneratedSources List Path
@@ -198,8 +193,9 @@ def bloopScalaModuleJSON scalaModule =
   def project = match scalaModule
     ScalaModule name dir version ivyDeps modDeps sourceDirs resourceDirs genSrcs =
       def myDir = bloopOutDir scalaModule
+      def deps = map (resolveIvyDep version) ivyDeps
       def scalaLib = scalaLibraryIvyDep version
-      def ivyClasspath = (scalaLib, ivyDeps) | coursierFetch | map getPathName
+      def ivyClasspath = (scalaLib, deps) | coursierFetch | map getPathName
       def depClasspath = modDeps | map bloopClassesDir
       def sources = (map ("{dir}/{_}") sourceDirs) ++ (map getPathName genSrcs)
       def fields =
