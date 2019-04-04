@@ -15,7 +15,7 @@ def ivyCacheDeps _ =
   | runJob
   | getJobOutputs
 
-global def readIvyDeps dir =
+global def readIvyDepsJSON dir =
   source "{dir}/ivydependencies.json" | getPathName | parseJSONFile
 
 # Should be installed by wit
@@ -141,26 +141,26 @@ tuple ScalaModule =
   global IvyDeps          List IvyDep
   global Deps             List ScalaModule
   # These are relative to RootDir
-  SourceDirs_             List String
+  SourceDirs              List String
   ResourceDirs            List String
   global GeneratedSources List Path
 
-global def getScalaModuleSourceDirs = match _
-  ScalaModule _ dir _ _ _ sourceDirs _ _ =
-    map ("{dir}/{_}") sourceDirs
+global def makeScalaModule name dir version =
+  ScalaModule name dir version Nil Nil Nil Nil Nil
 
-def genSourceDir name = mkdir "{root.getPathName}/generated-src"
+global def makeScalaModuleFromJSON dir name =
+  def json = readIvyDepsJSON dir
+  def scalaVersion = json // name // "scalaVersion" | getJString
+  def ivyDeps = json // name // "dependencies" | getJArray | map getJString | map parseIvyDep
+  makeScalaModule name dir (makeScalaVersion scalaVersion)
+  | setScalaModuleIvyDeps ivyDeps
 
-global def getScalaModuleGeneratedSourceDir = match _
-  ScalaModule name _ _ _ _ _ _ _ = genSourceDir name
-
-# Should the source dirs be relative to root or incldue it?
-global def makeSBTScalaModule name dir version =
-  def scalaVersion = makeScalaVersion version
-  def sourceDirs =
-    "src/main/scala", "src/main/java", Nil | map ("{dir}/{_}")
-  def resourceDirs = "{dir}/src/main/resources", Nil
-  ScalaModule name dir scalaVersion Nil Nil sourceDirs resourceDirs Nil
+global def scalaModuleAddSBTDefaults module =
+  def sourceDirs = "src/main/scala", "src/main/java", _
+  def resourceDirs = "src/main/resources", _
+  module
+  | editScalaModuleSourceDirs sourceDirs
+  | editScalaModuleResourceDirs resourceDirs
 
 # TODO implement scalacOptions
 def bloopScalaLibJSON scalaVersion =
