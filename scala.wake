@@ -157,8 +157,10 @@ global def makeScalaModule name dir version =
 
 global def makeScalaModuleFromJSON dir name =
   def json = readIvyDepsJSON dir
-  def scalaVersion = json // name // "scalaVersion" | getJString
-  def ivyDeps = json // name // "dependencies" | getJArray | map getJString | map parseIvyDep
+  def scalaVersion = json // name // "scalaVersion" | getJString | getOrElse (raise "scalaVersion not found!")
+  def ivyDeps =
+    json // name // "dependencies" | getJArray | omap (mapPartial getJString)
+    | getOrElse Nil | map parseIvyDep
   makeScalaModule name dir (makeScalaVersion scalaVersion)
   | setScalaModuleIvyDeps ivyDeps
 
