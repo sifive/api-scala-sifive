@@ -45,27 +45,33 @@ def bloopExe _ =
   if doit.getJobStatus == 0 then bloopBin else raise "Error! Unable to launch bloop!"
 
 # TODO
-# - Rename?
 # - Can we make this a fuse job? For some reason coursier can't find visible inputs
-# Given List IvyDep, returns List String
-# Return is paths to jars of the input IvyDeps and their transitive dependencies
-global def coursierFetch deps =
+# Given List IvyDep, returns Pair (List Path) (List Path)
+# Return is Pair (Paths to jars of the input IvyDeps) (Paths to jars of transitive dependencies)
+global def resolveIvyDeps deps =
   def checkAndToString dep =
-    if dep.ivyDepIsResolved then ivyDepToString dep else raise "Unresolved IvyDep {format dep}!"
+    if dep.isIvyDepExpanded then dep.ivyDepToString else raise "Unexpanded IvyDep {format dep}!"
   def depStrs = map checkAndToString deps
   def cachedDeps = ivyCacheDeps Unit
   def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, "-m", "offline", depStrs
-  #def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, depStrs
   def plan = makeManualPlan cmd (coursierBin, cachedDeps) (\_ Nil)
   def job = plan.runJob
-  if job.getJobStatus == 0 then
-    def strs = job.getJobStdout | tokenize '\n' | filter (_ !=~ "")
-    def tree = ltree scmpRaw strs
-    filter (_.getPathName ∈ tree) cachedDeps
-  else raise "Cannot resolve ivy dependencies, have you run `wit update` (currently unimplemented)?"
+  def strs =
+    if job.getJobStatus == 0
+    then job.getJobStdout | tokenize '\n' | filter (_ !=~ "")
+    else raise "Cannot resolve ivy dependencies, have you run `wit fetch-scala`?"
+  # Using the output of coursier, we get the actual paths and filter into requested and transitive
+  def depJar dep = "{dep.getIvyDepName}-{dep.getIvyDepRev}.jar"
+  match (splitBy (\s exists (matches ".*/{_.depJar}" s) deps) strs)
+    Pair req trans =
+      def reqTree = ltree scmpRaw req
+      def transTree = ltree scmpRaw trans
+      def reqJars = filter (_.getPathName ∈ reqTree) cachedDeps
+      def transJars = filter (_.getPathName ∈ transTree) cachedDeps
+      Pair reqJars transJars
 
 # TODO improve
-global def runIvyDep dep = runJava (coursierFetch (dep, Nil))
+global def runIvyDep dep = resolveIvyDeps (dep, Nil) | (\(Pair x y) x ++ y) | runJava
 
 # TODO improve
 # - Customize java installation
@@ -119,13 +125,13 @@ global def ivyDepToString dep = match dep
     Major    = "{org}::{name}:{rev}"
     Minor    = "{org}:::{name}:{rev}"
 
-global def resolveIvyDep version dep = match dep
+global def expandIvyDep version dep = match dep
   IvyDep org name rev cross = match cross
     Constant = dep
     Major    = IvyDep org "{name}_{scalaVersionMajorString version}" rev Constant
     Minor    = IvyDep org "{name}_{scalaVersionToString version}" rev Constant
 
-global def ivyDepIsResolved dep = match dep.getIvyDepCrossVersion
+global def isIvyDepExpanded dep = match dep.getIvyDepCrossVersion
   Constant = True
   _        = False
 
@@ -144,9 +150,10 @@ tuple ScalaModule =
   SourceDirs              List String
   ResourceDirs            List String
   global GeneratedSources List Path
+  global ScalacOptions    List String
 
 global def makeScalaModule name dir version =
-  ScalaModule name dir version Nil Nil Nil Nil Nil
+  ScalaModule name dir version Nil Nil Nil Nil Nil Nil
 
 global def makeScalaModuleFromJSON dir name =
   def json = readIvyDepsJSON dir
@@ -163,13 +170,14 @@ global def scalaModuleAddSBTDefaults module =
   | editScalaModuleResourceDirs resourceDirs
 
 # TODO implement scalacOptions
-def bloopScalaLibJSON scalaVersion =
+def bloopScalaLibJSON scalaVersion scalacOptions =
   def ivyDep = scalaCompilerIvyDep scalaVersion
+  def ivyJars = resolveIvyDeps (ivyDep, Nil) | (\(Pair x y) x ++ y)
   def org = Pair "organization" (JString ivyDep.getIvyDepOrg)
   def name = Pair "name" (JString ivyDep.getIvyDepName)
   def version = Pair "version" (JString ivyDep.getIvyDepRev)
-  def options = Pair "options" (JArray Nil)
-  def jars = Pair "jars" $ coursierFetch (ivyDep, Nil) | map getPathName | map JString | JArray
+  def options = Pair "options" (scalacOptions | map JString | JArray)
+  def jars = Pair "jars" $ ivyJars | map getPathName | map JString | JArray
   def setup =
     def fields =
       Pair "order" (JString "mixed")
@@ -191,13 +199,13 @@ def bloopClassesDir module = "{root.getPathName}/{module.getScalaModuleName}/cla
 def bloopScalaModuleJSON scalaModule =
   def bloopVersion = "1.2.5"
   def project = match scalaModule
-    ScalaModule name dir version ivyDeps modDeps sourceDirs resourceDirs genSrcs =
+    ScalaModule name dir ver ivyDeps modDeps srcDirs resources genSrcs scalacOpts =
       def myDir = bloopOutDir scalaModule
-      def deps = map (resolveIvyDep version) ivyDeps
-      def scalaLib = scalaLibraryIvyDep version
-      def ivyClasspath = (scalaLib, deps) | coursierFetch | map getPathName
+      def deps = map (expandIvyDep ver) ivyDeps
+      def scalaLib = scalaLibraryIvyDep ver
+      def ivyClasspath = resolveIvyDeps (scalaLib, deps) | (\(Pair x y) x ++ y) | map getPathName
       def depClasspath = modDeps | map bloopClassesDir
-      def sources = (map ("{dir}/{_}") sourceDirs) ++ (map getPathName genSrcs)
+      def sources = (map ("{dir}/{_}") srcDirs) ++ (map getPathName genSrcs)
       def fields =
         Pair   "name" (JString name)
         , Pair "directory" (JString dir)
@@ -206,7 +214,8 @@ def bloopScalaModuleJSON scalaModule =
         , Pair "classpath" (ivyClasspath ++ depClasspath | map JString | JArray)
         , Pair "out" (bloopOutDir scalaModule | JString)
         , Pair "classesDir" (bloopClassesDir scalaModule | JString)
-        , Pair "scala" (bloopScalaLibJSON version)
+        , Pair "resources" (resources | map JString | JArray)
+        , Pair "scala" (bloopScalaLibJSON ver scalacOpts)
         , Nil
       #JObject (jname, jdir, jsources, jdeps, jcp, jout, jclasses, jscala, Nil)
       JObject fields
