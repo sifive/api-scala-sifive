@@ -171,6 +171,15 @@ global def scalaModuleAddSBTDefaults module =
   | editScalaModuleSourceDirs sourceDirs
   | editScalaModuleResourceDirs resourceDirs
 
+def compareScalaModules a b =
+  scmpRaw a.getScalaModuleName b.getScalaModuleName
+
+global def getTransitiveDeps module =
+  def deps = module.getScalaModuleDeps
+  def all = (deps ++ (map getTransitiveDeps deps | flatten))
+  # TODO keep order
+  ltree compareScalaModules all | tlist
+
 # TODO implement scalacOptions
 def bloopScalaLibJSON scalaVersion scalacOptions =
   def ivyDep = scalaCompilerIvyDep scalaVersion
@@ -206,7 +215,8 @@ def bloopScalaModuleJSON scalaModule =
       def deps = map (expandIvyDep ver) ivyDeps
       def scalaLib = scalaLibraryIvyDep ver
       def ivyClasspath = resolveIvyDeps (scalaLib, deps) | (\(Pair x y) x ++ y) | map getPathName
-      def depClasspath = modDeps | map bloopClassesDir
+      def transDeps = scalaModule.getTransitiveDeps
+      def depClasspath = transDeps | map bloopClassesDir
       def sources = (map ("{dir}/{_}") srcDirs) ++ (map getPathName genSrcs)
       def fields =
         Pair   "name" (JString name)
@@ -238,23 +248,22 @@ def bloopConfigName module =
 # - Include ivy and transitive ivy deps in visible files
 # - Include Bloop configs and build dirs for dependencies
 # - Use local bloop
-global def compileScalaModule  module =
-  def config = module.bloopConfig
+global def compileScalaModule module =
   def outdir = mkdir module.bloopClassesDir
   def statedir = mkdir module.bloopOutDir
   def bin = bloopExe Unit
-  def modDeps = module.getScalaModuleDeps
+  def transDeps = module.getTransitiveDeps
+  def configFiles =
+    module.bloopConfig, map bloopConfig transDeps
   def allInputs =
     def sourceFiles =
       def dirs = module.getScalaModuleSourceDirs
       map (sources _ '.*\.(scala|java)') dirs | flatten
     def depClassFiles =
-      map compileScalaModule modDeps | flatten
+      map compileScalaModule transDeps | flatten
     sourceFiles ++ depClassFiles
-  def depConfigFiles =
-    map bloopConfig modDeps
   def cmd = bin.getPathName, "compile", "-c", bloopDir.getPathName, module.getScalaModuleName, Nil
-  def visible = (bin, config, outdir, statedir, depConfigFiles)
+  def visible = (bin, outdir, statedir, configFiles)
   def plan =
     makePlan cmd visible
     | setPlanFnOutputs (\_ files outdir.getPathName '.*\.class')
