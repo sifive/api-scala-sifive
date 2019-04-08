@@ -88,10 +88,10 @@ tuple ScalaVersion =
   global Major Integer
   global Minor Integer
 
-def scalaVersionToString = match _
+global def scalaVersionToString = match _
   ScalaVersion major minor = "2.{str(major)}.{str(minor)}"
 
-def scalaVersionMajorString = match _
+global def scalaVersionMajorString = match _
   ScalaVersion major _ = "2.{str(major)}"
 
 global def makeScalaVersion str =
