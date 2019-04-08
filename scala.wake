@@ -174,11 +174,17 @@ global def scalaModuleAddSBTDefaults module =
 def compareScalaModules a b =
   scmpRaw a.getScalaModuleName b.getScalaModuleName
 
-global def getTransitiveDeps module =
+global def getScalaModuleTransDeps module =
   def deps = module.getScalaModuleDeps
-  def all = (deps ++ (map getTransitiveDeps deps | flatten))
+  def all = (deps ++ (map getScalaModuleTransDeps deps | flatten))
   # TODO keep order
   ltree compareScalaModules all | tlist
+
+global def getScalaModuleTransIvyDeps module =
+  def mods = module, module.getScalaModuleTransDeps
+  def all = map getScalaModuleIvyDeps mods | flatten
+  # TODO keep order
+  ltree (scmpRaw _.ivyDepToString _.ivyDepToString) all | tlist
 
 # TODO implement scalacOptions
 def bloopScalaLibJSON scalaVersion scalacOptions =
@@ -210,12 +216,13 @@ def bloopClassesDir module = "{root.getPathName}/{module.getScalaModuleName}/cla
 def bloopScalaModuleJSON scalaModule =
   def bloopVersion = "1.2.5"
   def project = match scalaModule
-    ScalaModule name dir ver ivyDeps modDeps srcDirs resources genSrcs scalacOpts =
+    ScalaModule name dir ver _ modDeps srcDirs resources genSrcs scalacOpts =
       def myDir = bloopOutDir scalaModule
+      def ivyDeps = scalaModule.getScalaModuleTransIvyDeps
       def deps = map (expandIvyDep ver) ivyDeps
       def scalaLib = scalaLibraryIvyDep ver
       def ivyClasspath = resolveIvyDeps (scalaLib, deps) | (\(Pair x y) x ++ y) | map getPathName
-      def transDeps = scalaModule.getTransitiveDeps
+      def transDeps = scalaModule.getScalaModuleTransDeps
       def depClasspath = transDeps | map bloopClassesDir
       def sources = (map ("{dir}/{_}") srcDirs) ++ (map getPathName genSrcs)
       def fields =
@@ -252,7 +259,7 @@ global def compileScalaModule module =
   def outdir = mkdir module.bloopClassesDir
   def statedir = mkdir module.bloopOutDir
   def bin = bloopExe Unit
-  def transDeps = module.getTransitiveDeps
+  def transDeps = module.getScalaModuleTransDeps
   def configFiles =
     module.bloopConfig, map bloopConfig transDeps
   def allInputs =
@@ -263,7 +270,7 @@ global def compileScalaModule module =
       map compileScalaModule transDeps | flatten
     sourceFiles ++ depClassFiles
   def cmd = bin.getPathName, "compile", "-c", bloopDir.getPathName, module.getScalaModuleName, Nil
-  def visible = (bin, outdir, statedir, configFiles)
+  def visible = (bin, outdir, statedir, configFiles ++ allInputs)
   def plan =
     makePlan cmd visible
     | setPlanFnOutputs (\_ files outdir.getPathName '.*\.class')
