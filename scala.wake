@@ -180,6 +180,8 @@ global def getScalaModuleTransDeps module =
   # TODO keep order
   ltree compareScalaModules all | tlist
 
+# Excludes Scala itself
+# Does not run expand ivy dependencies, nor does it invoke coursier
 global def getScalaModuleTransIvyDeps module =
   def mods = module, module.getScalaModuleTransDeps
   def all = map getScalaModuleIvyDeps mods | flatten
@@ -207,9 +209,9 @@ def bloopScalaLibJSON scalaVersion scalacOptions =
     Pair "setup" (JObject fields)
   JObject (org, name, version, options, jars, setup, Nil)
 
-#def buildDir module = "{root.getPathName}/{module.getScalaModuleName}"
+def buildDir module = "{root.getPathName}/{module.getScalaModuleName}"
 def bloopOutDir module = "{bloopDir.getPathName}/{module.getScalaModuleName}"
-def bloopClassesDir module = "{root.getPathName}/{module.getScalaModuleName}/classes"
+def moduleClassesDir module = "{module.buildDir}/classes"
 
 # TODO
 # - implement module dependencies (see jdeps)
@@ -223,7 +225,7 @@ def bloopScalaModuleJSON scalaModule =
       def scalaLib = scalaLibraryIvyDep ver
       def ivyClasspath = resolveIvyDeps (scalaLib, deps) | (\(Pair x y) x ++ y) | map getPathName
       def transDeps = scalaModule.getScalaModuleTransDeps
-      def depClasspath = transDeps | map bloopClassesDir
+      def depClasspath = transDeps | map moduleClassesDir
       def sources = (map ("{dir}/{_}") srcDirs) ++ (map getPathName genSrcs)
       def fields =
         Pair   "name" (JString name)
@@ -232,7 +234,7 @@ def bloopScalaModuleJSON scalaModule =
         , Pair "dependencies" (JArray (map getScalaModuleName modDeps | map JString))
         , Pair "classpath" (ivyClasspath ++ depClasspath | map JString | JArray)
         , Pair "out" (bloopOutDir scalaModule | JString)
-        , Pair "classesDir" (bloopClassesDir scalaModule | JString)
+        , Pair "classesDir" (moduleClassesDir scalaModule | JString)
         , Pair "resources" (resources | map JString | JArray)
         , Pair "scala" (bloopScalaLibJSON ver scalacOpts)
         , Nil
@@ -251,12 +253,10 @@ def bloopConfigName module =
   def name = module.getScalaModuleName
   "{bloopDir.getPathName}/{name}.json"
 
-# TODO
-# - Include ivy and transitive ivy deps in visible files
-# - Include Bloop configs and build dirs for dependencies
-# - Use local bloop
+# Compiles a ScalaModule, returns generated *.class files
+# Returns all .class files even though this uses incremental compilation
 global def compileScalaModule module =
-  def outdir = mkdir module.bloopClassesDir
+  def outdir = mkdir module.moduleClassesDir
   def statedir = mkdir module.bloopOutDir
   def bin = bloopExe Unit
   def transDeps = module.getScalaModuleTransDeps
@@ -277,3 +277,12 @@ global def compileScalaModule module =
     | setPlanFnInputs (\_ allInputs | map getPathName)
   plan.runJob.getJobOutputs
 
+# Combines compiled .class files into a single .jar
+global def scalaModuleJar module =
+  def dir = mkdir "{module.buildDir}/jar"
+  def jar = "{dir.getPathName}/{module.getScalaModuleName}.jar"
+  def classesDir = module.moduleClassesDir
+  def classFiles = module.compileScalaModule
+  def cmd = which "jar", "cf", jar, "-C", classesDir, ".", Nil
+  def j = job cmd (dir, classFiles)
+  j.getJobOutput
