@@ -286,3 +286,13 @@ global def scalaModuleJar module =
   def cmd = which "jar", "cf", jar, "-C", classesDir, ".", Nil
   def j = job cmd (dir, classFiles)
   j.getJobOutput
+
+# Returns the full classpath to run the module
+global def scalaModuleClasspath module =
+  def version = module.getScalaModuleScalaVersion
+  def scalaIvyDep = scalaCompilerIvyDep version
+  def ivyJars =
+    def ivyDeps = (scalaIvyDep, module.getScalaModuleTransIvyDeps) | map (expandIvyDep version)
+    resolveIvyDeps ivyDeps | (\(Pair x y) x ++ y)
+  def moduleJars = (module, module.getScalaModuleTransDeps) | map scalaModuleJar
+  ivyJars ++ moduleJars
