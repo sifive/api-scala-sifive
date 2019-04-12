@@ -75,8 +75,7 @@ def millFilePrefix =
 
 def allScalaProjects =
   subscribe scalaProjects
-  | sortBy (lt depsComp)
-  | distinctBy (eq depsComp)
+  | distinctBy depsComp
 
 def depsComp proj1 proj2 =
   scmpNFKC proj1.scalaProjectName proj2.scalaProjectName
