@@ -255,7 +255,6 @@ def bloopConfigName module =
 
 # Compiles a ScalaModule, returns bloop config and generated jar file
 def memoizeBloopCompile name module = memoize 1 (
-  def outdir = mkdir module.moduleClassesDir
   def statedir = mkdir module.bloopOutDir
   def bin = bloopWake
   def transDeps = module.getScalaModuleTransDeps
@@ -263,26 +262,26 @@ def memoizeBloopCompile name module = memoize 1 (
   def configFilename = module.bloopConfigName
   def jarDir = mkdir "{module.buildDir}/jar"
   def jarName = "{jarDir.getPathName}/{module.getScalaModuleName}.jar"
-  def allInputs =
+  def inputs =
     def sourceFiles =
       def dirs = module.getScalaModuleSourceDirs
       def auto = map (sources _ '.*\.(scala|java)') dirs | flatten
       def unmanaged = module.getScalaModuleGeneratedSources
       unmanaged ++ auto
     def depJars = map compileScalaModule transDeps
+    def configs = map bloopConfig transDeps
     def timeout = sources here "bloop_timeout" | head
-    bin, timeout, depJars ++ sourceFiles
+    bin, timeout, bloopWake, configs ++ depJars ++ sourceFiles
   def bloopArgs =
     def args = "compile", "-c", bloopDir.getPathName, module.getScalaModuleName, Nil
     args | catWith " "
   def cmd =
     bin.getPathName, "-t", configTemplate.getPathName, "-c", configFilename
     , "-b", bloopInstall.getPathName, "--bloop-args", bloopArgs, "--jar", jarName, Nil
-  def visible = (bin, outdir, statedir, allInputs)
   def fnoutputs _ = configFilename, jarName, Nil
   def plan =
-    makeManualPlan cmd visible fnoutputs
-    | setPlanFnInputs (\_ allInputs | map getPathName)
+    makeManualPlan cmd inputs fnoutputs
+    | setPlanFnInputs (\_ inputs | map getPathName)
     | runJob
   match plan.getJobOutputs
     config, jar, Nil = Pair config jar
