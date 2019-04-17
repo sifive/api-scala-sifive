@@ -26,23 +26,24 @@ def coursierBin =
 
 # TODO Do this right
 # This should be installed by wit
-def bloopBin = makeStatePath "{bloopInstall.getPathName}/bloop"
+def bloopFiles = files bloopInstall.getPathName '.*' | map makeStatePath
 
 # TODO kind of ugly
-def bloopExe _ =
-  def launcher = sources here "bloop_server" | head
-  def timeout = sources here "bloop_timeout" | head
-  def common = sources here "common.py" | head
-  def pidfile = files here '.*\.pid' | head | makeStatePath
-  def other = files bloopInstall.getPathName '.*'
-  def cmd = launcher.getPathName, Nil
-  #def visible = pidfile, launcher, timeout, common, (map makeStatePath other)
-  def visible = launcher, timeout, common, (map makeStatePath other)
-  def doit =
-    makeManualPlan cmd visible (\_ Nil)
-    | setPlanKeep False # Always rerun to make sure we have a running bloop server
-    | runJob
-  if doit.getJobStatus == 0 then bloopBin else raise "Error! Unable to launch bloop!"
+#def bloopExe _ =
+#  def launcher = sources here "bloop_server" | head
+#  def timeout = sources here "bloop_timeout" | head
+#  def common = sources here "common.py" | head
+#  def pidfile = files here '.*\.pid' | head | makeStatePath
+#  def other = files bloopInstall.getPathName '.*'
+#  def cmd = launcher.getPathName, Nil
+#  #def visible = pidfile, launcher, timeout, common, (map makeStatePath other)
+#  def visible = launcher, timeout, common, (map makeStatePath other)
+#  def doit =
+#    makeManualPlan cmd visible (\_ Nil)
+#    | setPlanKeep False # Always rerun to make sure we have a running bloop server
+#    | runJob
+#  if doit.getJobStatus == 0 then bloopBin else raise "Error! Unable to launch bloop!"
+global def bloopWake = sources here "bloop_wake" | head
 
 # TODO
 # - Can we make this a fuse job? For some reason coursier can't find visible inputs
@@ -195,6 +196,9 @@ global def getScalaModuleTransIvyDeps module =
   # TODO keep order
   ltree (scmpRaw _.ivyDepToString _.ivyDepToString) all | tlist
 
+# Prefix with wildcard for the workspace
+def inws path = "$WORKSPACE/{path}"
+
 # TODO implement scalacOptions
 def bloopScalaLibJSON scalaVersion scalacOptions =
   def ivyDep = scalaCompilerIvyDep scalaVersion
@@ -203,7 +207,7 @@ def bloopScalaLibJSON scalaVersion scalacOptions =
   def name = Pair "name" (JString ivyDep.getIvyDepName)
   def version = Pair "version" (JString ivyDep.getIvyDepRev)
   def options = Pair "options" (scalacOptions | map JString | JArray)
-  def jars = Pair "jars" $ ivyJars | map getPathName | map JString | JArray
+  def jars = Pair "jars" (ivyJars | map getPathName | map inws | map JString | JArray)
   def setup =
     def fields =
       Pair "order" (JString "mixed")
@@ -237,13 +241,13 @@ def bloopScalaModuleJSON scalaModule =
       def sources = (map ("{dir}/{_}") srcDirs) ++ (map getPathName genSrcs)
       def fields =
         Pair   "name" (JString name)
-        , Pair "directory" (JString dir)
-        , Pair "sources" (JArray (map JString sources))
+        , Pair "directory" (JString dir.inws)
+        , Pair "sources" (sources | map inws | map JString | JArray)
         , Pair "dependencies" (JArray (map getScalaModuleName modDeps | map JString))
-        , Pair "classpath" (ivyClasspath ++ depClasspath | map JString | JArray)
-        , Pair "out" (bloopOutDir scalaModule | JString)
-        , Pair "classesDir" (moduleClassesDir scalaModule | JString)
-        , Pair "resources" (resources | map JString | JArray)
+        , Pair "classpath" (ivyClasspath ++ depClasspath | map inws | map JString | JArray)
+        , Pair "out" (scalaModule.bloopOutDir.inws | JString)
+        , Pair "classesDir" (scalaModule.moduleClassesDir.inws | JString)
+        , Pair "resources" (resources | map inws | map JString | JArray)
         , Pair "scala" (bloopScalaLibJSON ver scalacOpts)
         , Nil
       #JObject (jname, jdir, jsources, jdeps, jcp, jout, jclasses, jscala, Nil)
@@ -265,10 +269,11 @@ def bloopConfigName module =
 
 # Compiles a ScalaModule, returns generated *.class files
 # Returns all .class files even though this uses incremental compilation
+# TODO Make NOT a fuse job
 global def compileScalaModule module =
   def outdir = mkdir module.moduleClassesDir
   def statedir = mkdir module.bloopOutDir
-  def bin = bloopExe Unit
+  def bin = bloopWake
   def transDeps = module.getScalaModuleTransDeps
   def configFiles =
     module.bloopConfig, map bloopConfig transDeps
@@ -278,26 +283,39 @@ global def compileScalaModule module =
       def auto = map (sources _ '.*\.(scala|java)') dirs | flatten
       def unmanaged = module.getScalaModuleGeneratedSources
       unmanaged ++ auto
-    def depClassFiles =
-      map compileScalaModule transDeps | flatten
-    sourceFiles ++ depClassFiles
-  def cmd = bin.getPathName, "compile", "-c", bloopDir.getPathName, module.getScalaModuleName, Nil
-  def visible = (bin, outdir, statedir, configFiles ++ allInputs)
+    def depJars = map compileScalaModule transDeps
+    def timeout = sources here "bloop_timeout" | head
+    bin, timeout, depJars ++ sourceFiles
+  def bloopArgs = ("compile", module.getScalaModuleName, Nil) | cat
+  def cmd =
+    bin.getPathName, "-c", bloopDir.getPathName, "-b"
+    , bloopInstall.getPathName, "--bloop-args", bloopArgs, Nil
+  def visible = (bin, outdir, statedir, bloopFiles ++ configFiles ++ allInputs)
+  def _ = println $ catWith "\n" $ map getPathName visible
   def plan =
     makePlan cmd visible
     | setPlanFnOutputs (\_ files outdir.getPathName '.*\.class')
     | setPlanFnInputs (\_ allInputs | map getPathName)
-  plan.runJob.getJobOutputs
+  def classFiles = plan.runJob.getJobOutputs
+  def jarDir = mkdir "{module.buildDir}/jar"
+  def jarName = "{jarDir.getPathName}/{module.getScalaModuleName}.jar"
+  #makeJar jarDir jarName outdir classFiles
+  classFiles | head
+
+def makeJar jarDir jar classDir classFiles =
+  def cmd = which "jar", "cf", jar, "-C", classDir.getPathName, ".", Nil
+  def j = job cmd (jarDir, classFiles)
+  j.getJobOutput
 
 # Combines compiled .class files into a single .jar
-global def scalaModuleJar module =
-  def dir = mkdir "{module.buildDir}/jar"
-  def jar = "{dir.getPathName}/{module.getScalaModuleName}.jar"
-  def classesDir = module.moduleClassesDir
-  def classFiles = module.compileScalaModule
-  def cmd = which "jar", "cf", jar, "-C", classesDir, ".", Nil
-  def j = job cmd (dir, classFiles)
-  j.getJobOutput
+#global def scalaModuleJar module =
+#  def dir = mkdir "{module.buildDir}/jar"
+#  def jar = "{dir.getPathName}/{module.getScalaModuleName}.jar"
+#  def classesDir = module.moduleClassesDir
+#  def classFiles = module.compileScalaModule
+#  def cmd = which "jar", "cf", jar, "-C", classesDir, ".", Nil
+#  def j = job cmd (dir, classFiles)
+#  j.getJobOutput
 
 # Returns the full classpath to run the module
 global def scalaModuleClasspath module =
@@ -306,5 +324,5 @@ global def scalaModuleClasspath module =
   def ivyJars =
     def ivyDeps = (scalaIvyDep, module.getScalaModuleTransIvyDeps) | map (expandIvyDep version)
     resolveIvyDeps ivyDeps | (\(Pair x y) x ++ y)
-  def moduleJars = (module, module.getScalaModuleTransDeps) | map scalaModuleJar
+  def moduleJars = (module, module.getScalaModuleTransDeps) | map compileScalaModule
   ivyJars ++ moduleJars
