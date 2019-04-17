@@ -19,7 +19,6 @@ import subprocess
 import argparse
 import re
 import shutil
-from pathlib import Path
 import json
 
 if sys.version_info[0] < 3 or sys.version_info[1] < 5:
@@ -133,13 +132,13 @@ def jar_class_files(bloopconfig, jarfile):
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--workspace', default=os.getcwd(), type=Path,
+    parser.add_argument('--workspace', default=os.getcwd(), type=str,
                         help='Path to top of workspace, defaults to os.getcwd()')
-    parser.add_argument('--bloop-dir', '-b', required=True, type=Path,
+    parser.add_argument('--bloop-dir', '-b', required=True, type=str,
                         help='Path to bloop install directory, relative to workspace')
-    parser.add_argument('--config-template', '-t', required=True, type=Path,
+    parser.add_argument('--config-template', '-t', required=True, type=str,
                         help='Path to bloop config template, relative to workspace.')
-    parser.add_argument('--config-file', '-c', required=True, type=Path,
+    parser.add_argument('--config-file', '-c', required=True, type=str,
                         help='Path to bloop config output, relative to workspace.')
     parser.add_argument('--bloop-args', required=True, help='Arguments passed to bloop')
     parser.add_argument('--jar', required=True, help='Output jar file for compiled class files')
