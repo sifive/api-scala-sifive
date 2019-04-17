@@ -5,8 +5,12 @@ This script wraps Bloop (https://scalacenter.github.io/bloop/) to make it
 relocatable.
 
 It checks to see if Bloop is already running, if it is not, it launches Bloop
-with a timeout.
+with a timeout. It then takes a bloop config template (with $WORKSPACE
+wildcards) and replaces them with absolute paths to make a real bloop config
+file. This "real" bloop config file can then be used by bloop for compilation.
+The config files are generated every time in order to make this relocatable.
 """
+# TODO Should the path to the jar command be an argument?
 
 import os
 import sys
@@ -16,7 +20,7 @@ import argparse
 import re
 import shutil
 from pathlib import Path
-import fileinput
+import json
 
 if sys.version_info[0] < 3 or sys.version_info[1] < 5:
     print("This program requires Python version 3.5 or newer!")
@@ -75,6 +79,7 @@ def do_launch_bloop(directory):
         time.sleep(0.1)
 
 
+# TODO Check this algorithm and if it's properly threadsafe
 def launch_bloop(directory):
     """
     Checks if bloop is running, if not, launches it with a timeout
@@ -101,70 +106,58 @@ def launch_bloop(directory):
         print("[{}] We are managing the bloop server".format(SCRIPT_NAME))
 
 
-def run_bloop(bloop, args, config_dir):
-    proc = subprocess.run([bloop, args, "-c", config_dir],
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+def run_bloop(bloop, args):
+    arglist = args.split()
+    proc = subprocess.run([bloop] + arglist, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return proc.returncode == 0
 
 
-def edit_config_files(workspacedir, configdir):
-    filenames = [name for name in os.listdir(configdir) if name.endswith(".json")]
-    configfiles = ["{}/{}".format(configdir, fn) for fn in filenames]
-    print(configfiles)
-    for line in fileinput.input(files=configfiles, inplace=True):
-        print(re.sub(r'\$WORKSPACE', str(workspacedir), line), end='')
+def create_config_file(workspace, infile, outfile):
+    with open(infile, "r") as fin:
+        with open(outfile, "w") as fout:
+            for line in fin.readlines():
+                fout.write(re.sub(r'\$WORKSPACE', str(workspace), line))
 
 
-def main():
+def jar_class_files(bloopconfig, jarfile):
+    classes_dir = ""
+    with open(bloopconfig, "r") as json_file:
+        data = json.load(json_file)
+        classes_dir = data['project']['classesDir']
+    # TODO Better error handling
+    assert os.path.isdir(classes_dir)
+    cmd = ["jar", "cMf", jarfile, "-C", classes_dir, "."]
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return proc.returncode == 0
+
+
+def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--workspace', default=os.getcwd(), type=Path,
                         help='Path to top of workspace, defaults to os.getcwd()')
     parser.add_argument('--bloop-dir', '-b', required=True, type=Path,
                         help='Path to bloop install directory, relative to workspace')
-    parser.add_argument('--config-dir', '-c', required=True, type=Path,
-                        help=('Path to bloop config directory, relative to workspace. '
-                              'THIS SCRIPT WILL OVERWRITE THIS ARGUMENT TO BLOOP'))
-    parser.add_argument('--bloop-args', required=True,
-                        help='Arguments passed to bloop (except --config-dir/-c)')
+    parser.add_argument('--config-template', '-t', required=True, type=Path,
+                        help='Path to bloop config template, relative to workspace.')
+    parser.add_argument('--config-file', '-c', required=True, type=Path,
+                        help='Path to bloop config output, relative to workspace.')
+    parser.add_argument('--bloop-args', required=True, help='Arguments passed to bloop')
+    parser.add_argument('--jar', required=True, help='Output jar file for compiled class files')
 
-    args = parser.parse_args()
-    print(args)
+    return parser.parse_args()
 
-    workdir = "{}/jacktemp".format(args.config_dir)
 
-    # copy real config dir to workdir
-    try:
-        # TODO make this more precise, we really only want *.json and *.bin files
-        shutil.copytree(args.config_dir, workdir)
-    except FileExistsError:
-        print("Temporary working directory '{}' already exists, please delete it".format(workdir))
-        sys.exit(1)
+def main():
+    args = get_args()
 
     launch_bloop(args.bloop_dir)
 
-    # Edit all of the [project].json files
-    edit_config_files(args.workspace, workdir)
+    create_config_file(args.workspace, args.config_template, args.config_file)
 
-    # Run bloop
-    run_bloop(bloop_exe(args.bloop_dir), args.bloop_args, workdir)
+    run_bloop(bloop_exe(args.bloop_dir), args.bloop_args)
 
-    # Copy [project]-analysis.bin files back
-    # TODO implement
-
-    # Clean up
-    #shutil.rmtree(workdir)
+    jar_class_files(args.config_file, args.jar)
 
 
-# TODO Check this algorithm and if it's properly threadsafe
 if __name__ == "__main__":
     main()
-    #print(os.getcwd())
-    #print(sys.argv[0])
-    #print(args.dir)
-    #print(args.bloop)
-
-    # TODO
-    # - run bloop_server (or swallow it into this script)
-    # - run bloop compile [project]
-
-
