@@ -9,10 +9,9 @@ def ivyCache = mkdir "ivycache"
 def ivyCacheDeps _ =
   def fs = files ivyCache.getPathName '.*'
   makePlan ("<ivycache>", ivyCache.getPathName, Nil) Nil
-  | setPlanRunner    virtualRunner
   | setPlanKeep      False
   | setPlanFnOutputs (\_ fs)
-  | runJob
+  | runJobWith       virtualRunner
   | getJobOutputs
 
 global def readIvyDepsJSON dir =
