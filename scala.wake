@@ -128,8 +128,8 @@ tuple ScalaModule =
   global IvyDeps:            List IvyDep
   global Deps:               List ScalaModule
   # These are relative to RootDir
-  SourceDirs:                List String
-  ResourceDirs:              List String
+  global SourceDirs:         List String
+  global ResourceDirs:       List String
   # These operations could be expensive
   global FnGeneratedSources: Unit => List Path
   global ScalacOptions:      List String
@@ -161,6 +161,12 @@ def memoizeGenSrcs name module = memoize 1 (
 )
 global def getScalaModuleGeneratedSources module =
   memoizeGenSrcs module.getScalaModuleName module
+
+global def getScalaModuleResolvedSourceDirs module =
+  map ("{module.getScalaModuleRootDir}/{_}") module.getScalaModuleSourceDirs
+
+global def getScalaModuleResolvedResourceDirs module =
+  map ("{module.getScalaModuleRootDir}/{_}") module.getScalaModuleResourceDirs
 
 global def getScalaModuleTransDeps module =
   def deps = module.getScalaModuleDeps
@@ -206,27 +212,28 @@ def moduleClassesDir module = "{module.buildDir}/classes"
 
 # TODO
 # - implement module dependencies (see jdeps)
-def bloopScalaModuleJSON scalaModule =
+def bloopScalaModuleJSON module =
   def bloopVersion = "1.2.5"
-  def project = match scalaModule
-    ScalaModule name dir ver _ modDeps srcDirs resources _ scalacOpts =
-      def myDir = bloopOutDir scalaModule
-      def ivyDeps = scalaModule.getScalaModuleTransIvyDeps
+  def project = match module
+    ScalaModule name dir ver _ modDeps _ _ _ scalacOpts =
+      def myDir = bloopOutDir module
+      def ivyDeps = module.getScalaModuleTransIvyDeps
       def deps = map (expandIvyDep ver) ivyDeps
       def scalaLib = scalaLibraryIvyDep ver
       def ivyClasspath = resolveIvyDeps (scalaLib, deps) | (\(Pair x y) x ++ y) | map getPathName
-      def transDeps = scalaModule.getScalaModuleTransDeps
+      def transDeps = module.getScalaModuleTransDeps
       def depClasspath = transDeps | map moduleClassesDir
-      def genSrcs = scalaModule.getScalaModuleGeneratedSources
-      def sources = (map ("{dir}/{_}") srcDirs) ++ (map getPathName genSrcs)
+      def genSrcs = module.getScalaModuleGeneratedSources
+      def sources = module.getScalaModuleResolvedSourceDirs ++ (map getPathName genSrcs)
+      def resources = module.getScalaModuleResolvedResourceDirs
       def fields =
         Pair   "name" (JString name)
         , Pair "directory" (JString dir.inws)
         , Pair "sources" (sources | map inws | map JString | JArray)
         , Pair "dependencies" (JArray (map getScalaModuleName modDeps | map JString))
         , Pair "classpath" (ivyClasspath ++ depClasspath | map inws | map JString | JArray)
-        , Pair "out" (scalaModule.bloopOutDir.inws | JString)
-        , Pair "classesDir" (scalaModule.moduleClassesDir.inws | JString)
+        , Pair "out" (module.bloopOutDir.inws | JString)
+        , Pair "classesDir" (module.moduleClassesDir.inws | JString)
         , Pair "resources" (resources | map inws | map JString | JArray)
         , Pair "scala" (bloopScalaLibJSON ver scalacOpts)
         , Nil
@@ -260,17 +267,18 @@ def memoizeBloopCompile name module = memoize 1 (
   def configTemplate = module.bloopTemplate
   def configFilename = module.bloopConfigName
   def jarDir = mkdir "{module.buildDir}/jar"
-  def jarName = "{jarDir.getPathName}/{module.getScalaModuleName}.jar"
+  def jarName = "{jarDir.getPathName}/{name}.jar"
   def inputs =
     def sourceFiles =
-      def dirs = module.getScalaModuleSourceDirs
+      def dirs = module.getScalaModuleResolvedSourceDirs
       def auto = map (sources _ '.*\.(scala|java)') dirs | flatten
       def unmanaged = module.getScalaModuleGeneratedSources
-      unmanaged ++ auto
+      def total = unmanaged ++ auto
+      if total.empty then raise "Error! No source files in ScalaModule '{name}'!" else total
     def depJars = map compileScalaModule transDeps
     def configs = map bloopConfig transDeps
     def timeout = sources here "bloop_timeout" | head
-    bin, timeout, bloopWake, configs ++ depJars ++ sourceFiles
+    bin, timeout, bloopWake, configTemplate, configs ++ depJars ++ sourceFiles
   def bloopArgs =
     def args = "compile", "-c", bloopDir.getPathName, module.getScalaModuleName, Nil
     args | catWith " "

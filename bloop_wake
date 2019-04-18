@@ -28,7 +28,6 @@ if sys.version_info[0] < 3 or sys.version_info[1] < 5:
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 SCRIPT_NAME = os.path.basename(__file__)
 
-
 def pid_file():
     return "{}/.bloop_timeout.pid".format(SCRIPT_DIR)
 
@@ -107,7 +106,7 @@ def launch_bloop(directory):
 
 def run_bloop(bloop, args):
     arglist = args.split()
-    proc = subprocess.run([bloop] + arglist, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.run([bloop] + arglist)
     return proc.returncode == 0
 
 
@@ -153,9 +152,11 @@ def main():
 
     create_config_file(args.workspace, args.config_template, args.config_file)
 
-    run_bloop(bloop_exe(args.bloop_dir), args.bloop_args)
+    if not run_bloop(bloop_exe(args.bloop_dir), args.bloop_args):
+        sys.exit(1)
 
-    jar_class_files(args.config_file, args.jar)
+    if not jar_class_files(args.config_file, args.jar):
+        sys.exit(1)
 
 
 if __name__ == "__main__":
