@@ -2,13 +2,13 @@
 # Important directories
 def root = mkdir "build/{here}"
 def bloopDir = mkdir "{root.getPathName}/bloop"
-def bloopInstall = mkdir "scala"
-def ivyCache = mkdir "ivycache"
+def bloopInstall = "scala"
+def ivyCache = "ivycache"
 
 # Virtual job that owns all fetched ivy dependencies
 def ivyCacheDeps _ =
-  def fs = files ivyCache.getPathName '.*'
-  makePlan ("<ivycache>", ivyCache.getPathName, Nil) Nil
+  def fs = files ivyCache '.*'
+  makePlan ("<ivycache>", ivyCache, Nil) Nil
   | setPlanKeep      False
   | setPlanFnOutputs (\_ fs)
   | runJobWith       virtualRunner
@@ -19,9 +19,9 @@ global def readIvyDepsJSON dir =
 
 # Should be installed by wit
 def coursierBin =
-  def bins = files bloopInstall.getPathName '.*coursier.*'
+  def bins = files bloopInstall '.*coursier.*'
   def bin = bins | head | makeStatePath
-  try (\_ raise "coursier not found!") bin
+  try (\_ raise "Coursier not found! Did you run `wit fetch-scala`?") bin
 
 def bloopWake = sources here "bloop_wake" | head
 
@@ -34,7 +34,7 @@ global def resolveIvyDeps deps =
     if dep.isIvyDepExpanded then dep.ivyDepToString else raise "Unexpanded IvyDep {format dep}!"
   def depStrs = map checkAndToString deps
   def cachedDeps = ivyCacheDeps Unit
-  def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache.getPathName, "-m", "offline", depStrs
+  def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache, "-m", "offline", depStrs
   def plan = makeManualPlan cmd (coursierBin, cachedDeps) (\_ Nil)
   def job = plan.runJob
   def strs =
@@ -284,7 +284,7 @@ def memoizeBloopCompile name module = memoize 1 (
     args | catWith " "
   def cmd =
     bin.getPathName, "-t", configTemplate.getPathName, "-c", configFilename
-    , "-b", bloopInstall.getPathName, "--bloop-args", bloopArgs, "--jar", jarName, Nil
+    , "-b", bloopInstall, "--bloop-args", bloopArgs, "--jar", jarName, Nil
   def fnoutputs _ = configFilename, jarName, Nil
   def plan =
     makeManualPlan cmd inputs fnoutputs
