@@ -273,8 +273,7 @@ def memoizeBloopCompile name module = memoize 1 (
       def dirs = module.getScalaModuleResolvedSourceDirs
       def auto = map (sources _ '.*\.(scala|java)') dirs | flatten
       def unmanaged = module.getScalaModuleGeneratedSources
-      def total = unmanaged ++ auto
-      if total.empty then raise "Error! No source files in ScalaModule '{name}'!" else total
+      unmanaged ++ auto
     def depJars = map compileScalaModule transDeps
     def configs = map bloopConfig transDeps
     def timeout = sources here "bloop_timeout" | head
