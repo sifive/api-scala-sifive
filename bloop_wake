@@ -44,6 +44,12 @@ def bloop_launcher(directory):
     return "{}/blp-server".format(directory)
 
 
+def pretty_cmd(cmd):
+    def wrap(s):
+        return '"{}"'.format(s) if ' ' in s else s
+    return ' '.join([wrap(s) for s in cmd])
+
+
 def launch_timeout():
     cmd = [timeout_exe()]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
@@ -106,7 +112,10 @@ def launch_bloop(directory):
 
 def run_bloop(bloop, args):
     arglist = args.split()
-    proc = subprocess.run([bloop] + arglist)
+    cmd = [bloop] + arglist
+    # TODO better command-line echoing
+    print(pretty_cmd(cmd))
+    proc = subprocess.run(cmd)
     return proc.returncode == 0
 
 
@@ -119,15 +128,32 @@ def create_config_file(workspace, infile, outfile):
 
 def jar_class_files(bloopconfig, jarfile):
     classes_dir = ""
+    resource_dirs = []
     with open(bloopconfig, "r") as json_file:
         data = json.load(json_file)
         classes_dir = data['project']['classesDir']
+        resource_dirs = data['project']['resources']
     # If it doesn't exist, bloop had nothing to compile, make a directory for the sake of jar
     if not os.path.isdir(classes_dir):
         os.mkdir(classes_dir)
+    # First zip up all of the class files
     cmd = ["jar", "cMf", jarfile, "-C", classes_dir, "."]
+    print(pretty_cmd(cmd))
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return proc.returncode == 0
+    if proc.returncode != 0:
+        return False
+    # Then update the jar with the contents of each existing resource directory
+    #   It's normal to specify resource directories that don't exist (eg. src/main/resources)
+    # Note that we don't do this in a single command because multiple directories
+    #   could have the same subdirectory which causes the jar command to fail
+    for d in resource_dirs:
+        if os.path.isdir(d):
+            cmd = ["jar", "uMf", jarfile, "-C", d, "."]
+            print(pretty_cmd(cmd))
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if proc.returncode != 0:
+                return False
+    return True
 
 
 def get_args():
@@ -154,9 +180,11 @@ def main():
     create_config_file(args.workspace, args.config_template, args.config_file)
 
     if not run_bloop(bloop_exe(args.bloop_dir), args.bloop_args):
+        print("Scala compilation failed for '{}'".format(pretty_cmd(sys.argv)), file=sys.stderr)
         sys.exit(1)
 
     if not jar_class_files(args.config_file, args.jar):
+        print("Jar creation failed for '{}'".format(pretty_cmd(sys.argv)), file=sys.stderr)
         sys.exit(1)
 
 

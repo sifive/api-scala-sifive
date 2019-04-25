@@ -272,8 +272,9 @@ def memoizeBloopCompile name module = memoize 1 (
     def sourceFiles =
       def dirs = module.getScalaModuleResolvedSourceDirs
       def auto = map (sources _ '.*\.(scala|java)') dirs | flatten
+      def resources = map (sources _ '.*') module.getScalaModuleResolvedResourceDirs | flatten
       def unmanaged = module.getScalaModuleGeneratedSources
-      unmanaged ++ auto
+      unmanaged ++ resources ++ auto
     def depJars = map compileScalaModule transDeps
     def configs = map bloopConfig transDeps
     def timeout = sources here "bloop_timeout" | head
