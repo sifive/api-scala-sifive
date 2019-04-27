@@ -20,6 +20,9 @@ import argparse
 import re
 import shutil
 import json
+import zipfile
+from tempfile import TemporaryDirectory
+import itertools
 
 if sys.version_info[0] < 3 or sys.version_info[1] < 5:
     print("This program requires Python version 3.5 or newer!")
@@ -126,34 +129,48 @@ def create_config_file(workspace, infile, outfile):
                 fout.write(re.sub(r'\$WORKSPACE', str(workspace), line))
 
 
-def jar_class_files(bloopconfig, jarfile):
+def make_jar(bloopconfig, jarfile):
+    """
+    This function is intended to create reproducible jars
+    The jar command does appear to do this properly, so we have to do it ourselves
+    """
     classes_dir = ""
     resource_dirs = []
     with open(bloopconfig, "r") as json_file:
         data = json.load(json_file)
         classes_dir = data['project']['classesDir']
         resource_dirs = data['project']['resources']
-    # If it doesn't exist, bloop had nothing to compile, make a directory for the sake of jar
+    # If it doesn't exist, bloop had nothing to compile, make a directory for the sake of the jar
     if not os.path.isdir(classes_dir):
         os.mkdir(classes_dir)
-    # First zip up all of the class files
-    cmd = ["jar", "cMf", jarfile, "-C", classes_dir, "."]
-    print(pretty_cmd(cmd))
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if proc.returncode != 0:
-        return False
-    # Then update the jar with the contents of each existing resource directory
-    #   It's normal to specify resource directories that don't exist (eg. src/main/resources)
-    # Note that we don't do this in a single command because multiple directories
-    #   could have the same subdirectory which causes the jar command to fail
-    for d in resource_dirs:
-        if os.path.isdir(d):
-            cmd = ["jar", "uMf", jarfile, "-C", d, "."]
-            print(pretty_cmd(cmd))
-            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if proc.returncode != 0:
-                return False
-    return True
+
+    all_dirs = [classes_dir] + [d for d in resource_dirs if os.path.isdir(d)]
+    with zipfile.ZipFile(jarfile, 'w', zipfile.ZIP_DEFLATED) as zip:
+        written = set()
+        for dir in all_dirs:
+            for root, dirs, files in os.walk(dir):
+                for f in itertools.chain(dirs, files):
+                    abspath = os.path.join(root, f)
+                    relpath = os.path.relpath(abspath, dir)
+                    # https://stackoverflow.com/questions/434641#6297838
+                    # Note the default time for ZipInfo is 1 Jan 1980
+                    if os.path.isfile(abspath):
+                        assert relpath not in written, \
+                            "Attempting to jar duplicate filename {}".format(relpath)
+                        info = zipfile.ZipInfo(relpath)
+                        info.external_attr = 0o664 << 16 # -rw-rw-r--
+                        bytes = open(abspath, 'rb').read()
+                        zip.writestr(info, bytes, zipfile.ZIP_DEFLATED)
+                    elif os.path.isdir(abspath):
+                        # Duplicate directories are fine
+                        if relpath not in written:
+                            info = zipfile.ZipInfo(relpath + '/')
+                            info.external_attr = 0o40775 << 16 # drwxrwxr-x
+                            info.external_attr |= 0x10 # MS-DOS directory flag
+                            zip.writestr(info, '', zipfile.ZIP_STORED)
+                    else:
+                        raise Exception("Unexpected non-file and non-dir path {}".format(abspath))
+                    written.add(relpath)
 
 
 def get_args():
@@ -183,7 +200,10 @@ def main():
         print("Scala compilation failed for '{}'".format(pretty_cmd(sys.argv)), file=sys.stderr)
         sys.exit(1)
 
-    if not jar_class_files(args.config_file, args.jar):
+    try:
+        make_jar(args.config_file, args.jar)
+    except Exception as e:
+        print(e, file=sys.stderr)
         print("Jar creation failed for '{}'".format(pretty_cmd(sys.argv)), file=sys.stderr)
         sys.exit(1)
 
