@@ -290,9 +290,12 @@ def memoizeBloopCompile name module = memoize 1 (
     makeManualPlan cmd inputs fnoutputs
     | setPlanFnInputs (\_ inputs | map getPathName)
     | runJob
-  match plan.getJobOutputs
-    config, jar, Nil = Pair config jar
-    _ = raise "Scala Compilation for {name} failed!"
+  def outputs = plan.getJobOutputs
+  def findjson = outputs | filter (matches configFilename _.getPathName)
+  def findjar = outputs | filter (matches jarName _.getPathName)
+  match (Pair findjson findjar)
+    Pair (json, Nil) (jar, Nil) = Pair json jar
+    _ = raise "Expected exactly one json and one jar, got {format outputs}"
 )
 def bloopCompile module = memoizeBloopCompile module.getScalaModuleName module
 
