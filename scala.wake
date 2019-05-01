@@ -182,10 +182,14 @@ def getScalaModuleExpandedResourceDirs module =
   map (simplify "{mroot}/{_}") module.getScalaModuleResourceDirs
 
 global def getScalaModuleTransDeps module =
+  def folder tree mod =
+    foldl helper tree mod.getScalaModuleDeps
   def helper tree mod = match (mod ∈ tree)
     True = tree
-    False = foldl helper (tinsert mod tree) mod.getScalaModuleDeps
-  helper (tnew compareScalaModules) module | tlist
+    False = folder (tinsert mod tree) mod
+  def tree = folder (tnew compareScalaModules) module
+  if module ∈ tree then raise "ScalaModule '{module.getScalaModuleName}' depends on itself!"
+  else tree | tlist
 
 def flip f a b = f b a
 
@@ -193,9 +197,9 @@ def flip f a b = f b a
 # Does not run expand ivy dependencies, nor does it invoke coursier
 # TODO Make helper that takes an accumulator tree and checks if already present, returns if so, otherwise continues
 global def getScalaModuleTransIvyDeps module =
-  def transDeps = module.getScalaModuleTransDeps
+  def allMods = module, module.getScalaModuleTransDeps
   def tree = tnew (scmpRaw _.ivyDepToString _.ivyDepToString)
-  map getScalaModuleIvyDeps transDeps
+  map getScalaModuleIvyDeps allMods
   | flatten
   | foldl tinsert.flip tree
   | tlist
