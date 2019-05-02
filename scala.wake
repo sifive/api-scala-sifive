@@ -1,6 +1,7 @@
 
 # Important directories
-def root = mkdir "build/{here}"
+def buildRoot = mkdir "build"
+def root = mkdir "{buildRoot.getPathName}/{here}"
 def bloopDir = mkdir "{root.getPathName}/bloop"
 # Where I expect Scala to be installed by wit
 def bloopInstall = "scala"
@@ -283,7 +284,9 @@ def bloopScalaLibJSON scalaVersion scalacOptions =
     Nil
   )
 
-def buildDir module = "{root.getPathName}/{module.getScalaModuleName}"
+def buildDir module =
+  def suffix = module.getScalaModuleScalaVersion.scalaVersionMajorString
+  "{buildRoot.getPathName}/{module.getScalaModuleName}/scala-{suffix}"
 def bloopOutDir module = "{bloopDir.getPathName}/{module.getScalaModuleName}"
 def moduleClassesDir module = "{module.buildDir}/classes"
 
