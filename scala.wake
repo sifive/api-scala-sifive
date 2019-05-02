@@ -6,15 +6,11 @@ def bloopDir = mkdir "{root.getPathName}/bloop"
 def bloopInstall = "scala"
 # Where I expect Scala Ivy dependencies to be downloaded
 def ivyCache = "ivycache"
+# Python wrapper script for invoking bloop
+def bloopWake = source "{here}/bloop_wake"
 
-# Virtual job that owns all fetched ivy dependencies
-def ivyCacheDeps Unit =
-  def fs = files ivyCache '.*'
-  makePlan ("<ivycache>", ivyCache, Nil) Nil
-  | setPlanKeep      False
-  | setPlanFnOutputs (\_ fs)
-  | runJobWith       virtualRunner
-  | getJobOutputs
+# A explicitly dummy path
+def dummyPath = bloopWake
 
 global def readIvyDepsJSON dir =
   source "{dir}/ivydependencies.json" | getPathName | parseJSONFile
@@ -25,17 +21,64 @@ def coursierBin =
   def bin = bins | head | makeStatePath
   try (\_ raise "Coursier not found! Did you run `wit fetch-scala`?") bin
 
-def bloopWake = source "{here}/bloop_wake"
+# Virtual job that owns all fetched ivy dependencies
+def ivyCacheDeps Unit =
+  def fs = files ivyCache '.*'
+  makePlan ("<ivycache>", ivyCache, Nil) Nil
+  | setPlanKeep      False
+  | setPlanFnOutputs (\_ fs)
+  | runJobWith       virtualRunner
+  | getJobOutputs
+
+# Memoized tree for converting from Strings to Paths to jars in Coursier cache
+def ivyCacheJars Unit = memoize 0 (
+  def isJar = matches '.*\.jar' _.getPathName
+  ivyCacheDeps Unit
+  | filter isJar
+  | map (\p Pair p.getPathName.stripIvyPathPrefix p)
+  | ltree cmpIvyCachePair
+)
+
+# TODO This is kind of sketchy, are releases and maven2 sufficient?
+def stripIvyPathPrefix name =
+  extract '.*?/(?:releases|maven2)/(.*)' name | head
+
+def ivyDepToCoursierCache dep =
+  match dep.requireExpanded
+    IvyDep org name rev _ =
+      def prefix = replace '\.' '/' org
+      "{prefix}/{name}/{rev}/{name}-{rev}.jar"
+
+def cmpIvyCachePair (Pair n1 _) (Pair n2 _) = scmpRaw n1 n2
+
+# Convert an IvyDep into the corresponding filename in coursier ivy cache
+def ivyDepToFilename (IvyDep _ name rev _) = "{name}-{rev}.jar"
+
+def getIvyDepJars filenames =
+  def pairs = map (Pair _ dummyPath) filenames
+  def mtree = ltree cmpIvyCachePair pairs
+  (ivyCacheJars Unit) ∩ mtree | tlist | map getPairSecond
+
+# Get the Jar for an IvyDep
+# Returns a Path
+global def getIvyDepJar dep =
+  def err Unit =
+    raise "{dep.ivyDepToString} not found in downloaded ivy dependencies! Did you run `wit fetch-scala`?"
+  match (getIvyDepJars (dep.requireExpanded.ivyDepToCoursierCache, Nil))
+    value, Nil = value
+    Nil        = err Unit
+    _          = raise "This shouldn't be possible"
+
+def requireExpanded dep =
+  if dep.isIvyDepExpanded then dep else raise "Unexpanded IvyDep '{dep.ivyDepToString}'"
 
 # TODO
 # - Can we make this a fuse job? For some reason coursier can't find visible inputs
 # Determines transitive ivy dependencies
-# Given List IvyDep, returns Pair (List Path) (List Path)
-# Return is Pair (Paths to jars of the input IvyDeps) (Paths to jars of transitive dependencies)
+# Given List IvyDep, returns List Path
+# Returns paths to dep jars and transitive dependencies
 global def resolveIvyDeps deps =
-  def checkAndToString dep =
-    if dep.isIvyDepExpanded then dep.ivyDepToString else raise "Unexpanded IvyDep {format dep}!"
-  def depStrs = map checkAndToString deps
+  def depStrs = map (_.requireExpanded.ivyDepToString) deps
   def cachedDeps = ivyCacheDeps Unit
   def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache, "-m", "offline", depStrs
   def plan = makeManualPlan cmd (coursierBin, cachedDeps) (\_ Nil)
@@ -45,22 +88,17 @@ global def resolveIvyDeps deps =
     then job.getJobStdout | tokenize '\n' | filter (_ !=* "")
     else raise "Cannot resolve ivy dependencies, have you run `wit fetch-scala`?"
   # Using the output of coursier, we get the actual paths and filter into requested and transitive
-  def depJar dep = "{dep.getIvyDepName}-{dep.getIvyDepRev}.jar"
-  match (splitBy (\s exists (matches ".*/{_.depJar}" s) deps) strs)
-    Pair req trans =
-      def reqTree = ltree scmpRaw req
-      def transTree = ltree scmpRaw trans
-      def reqJars = filter (_.getPathName ∈ reqTree) cachedDeps
-      def transJars = filter (_.getPathName ∈ transTree) cachedDeps
-      Pair reqJars transJars
+  def filenames = map stripIvyPathPrefix strs
+  def res = getIvyDepJars filenames
+  def err Unit =
+    def fns = catWith ", " filenames
+    def paths = res | map format | catWith ", "
+    raise "Something went wrong! Looking for {fns}, got wrong number of paths: {paths}"
+  if res.len != filenames.len then (err Unit) else res
 
-# This should instead just search tree of jars
-global def getIvyDepJar dep =
-  resolveIvyDeps (dep, Nil)
-  | (\(Pair x y) x ++ y)
 
 # TODO improve
-global def runIvyDep dep = resolveIvyDeps (dep, Nil) | (\(Pair x y) x ++ y) | runJava
+global def runIvyDep dep = resolveIvyDeps (dep, Nil) | runJava
 
 # TODO improve
 # - Customize java installation
@@ -225,7 +263,7 @@ def inws path = "$WORKSPACE/{path}"
 def bloopScalaLibJSON scalaVersion scalacOptions =
   def x → y = Pair x y
   def ivyDep = scalaCompilerIvyDep scalaVersion
-  def ivyJars = resolveIvyDeps (ivyDep, Nil) | (\(Pair x y) x ++ y)
+  def ivyJars = resolveIvyDeps (ivyDep, Nil)
   def jars = ivyJars | map getPathName | map inws | map JString | JArray
   JObject (
     "organization" → JString ivyDep.getIvyDepOrg,
@@ -257,7 +295,7 @@ def bloopScalaModuleJSON module = match module
     def ivyDeps = module.getScalaModuleTransIvyDeps
     def deps = map (expandIvyDep ver) ivyDeps
     def scalaLib = scalaLibraryIvyDep ver
-    def ivyClasspath = resolveIvyDeps (scalaLib, deps) | (\(Pair x y) x ++ y) | map getPathName
+    def ivyClasspath = resolveIvyDeps (scalaLib, deps) | map getPathName
     def transDeps = module.getScalaModuleTransDeps
     def depClasspath = transDeps | map moduleClassesDir
     def genSrcs = module.getScalaModuleGeneratedSources
@@ -346,6 +384,6 @@ global def scalaModuleClasspath module =
   def scalaIvyDep = scalaCompilerIvyDep version
   def ivyJars =
     def ivyDeps = (scalaIvyDep, module.getScalaModuleTransIvyDeps) | map (expandIvyDep version)
-    resolveIvyDeps ivyDeps | (\(Pair x y) x ++ y)
+    resolveIvyDeps ivyDeps
   def moduleJars = (module, module.getScalaModuleTransDeps) | map compileScalaModule
   moduleJars ++ ivyJars
