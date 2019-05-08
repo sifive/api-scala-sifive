@@ -10,9 +10,6 @@ def ivyCache = "ivycache"
 # Python wrapper script for invoking bloop
 def bloopWake = source "{here}/bloop_wake"
 
-# A explicitly dummy path
-def dummyPath = bloopWake
-
 global def readIvyDepsJSON dir =
   source "{dir}/ivydependencies.json" | getPathName | parseJSONFile
 
@@ -56,6 +53,7 @@ def cmpIvyCachePair (Pair n1 _) (Pair n2 _) = n1 <=>* n2
 def ivyDepToFilename (IvyDep _ name rev _) = "{name}-{rev}.jar"
 
 def getIvyDepJars filenames =
+  def dummyPath = bloopWake # A explicitly dummy path
   def pairs = map (Pair _ dummyPath) filenames
   def mtree = listToTree cmpIvyCachePair pairs
   (ivyCacheJars Unit) ∩ mtree | treeToList | map getPairSecond
