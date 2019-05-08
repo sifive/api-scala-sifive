@@ -45,8 +45,8 @@ global def resolveIvyDeps deps =
   def depJar dep = "{dep.getIvyDepName}-{dep.getIvyDepRev}.jar"
   match (splitBy (\s exists (matches ".*/{_.depJar}" s) deps) strs)
     Pair req trans =
-      def reqTree = ltree scmpRaw req
-      def transTree = ltree scmpRaw trans
+      def reqTree = listToTree scmp req
+      def transTree = listToTree scmp trans
       def reqJars = filter (_.getPathName ∈ reqTree) cachedDeps
       def transJars = filter (_.getPathName ∈ transTree) cachedDeps
       Pair reqJars transJars
@@ -154,7 +154,7 @@ global def scalaModuleAddSBTDefaults module =
   | editScalaModuleResourceDirs resourceDirs
 
 def compareScalaModules a b =
-  scmpRaw a.getScalaModuleName b.getScalaModuleName
+  scmp a.getScalaModuleName b.getScalaModuleName
 
 def memoizeGenSrcs name module = memoize 1 (
   module.getScalaModuleFnGeneratedSources Unit
@@ -172,7 +172,7 @@ global def getScalaModuleTransDeps module =
   def deps = module.getScalaModuleDeps
   def all = (deps ++ (map getScalaModuleTransDeps deps | flatten))
   # TODO keep order
-  ltree compareScalaModules all | tlist
+  listToTree compareScalaModules all | treeToList
 
 # Excludes Scala itself
 # Does not run expand ivy dependencies, nor does it invoke coursier
@@ -180,7 +180,7 @@ global def getScalaModuleTransIvyDeps module =
   def mods = module, module.getScalaModuleTransDeps
   def all = map getScalaModuleIvyDeps mods | flatten
   # TODO keep order
-  ltree (scmpRaw _.ivyDepToString _.ivyDepToString) all | tlist
+  listToTree (scmp _.ivyDepToString _.ivyDepToString) all | treeToList
 
 # Prefix with wildcard for the workspace
 def inws path = "$WORKSPACE/{path}"
