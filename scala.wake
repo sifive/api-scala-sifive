@@ -289,6 +289,7 @@ def memoizeBloopCompile name module = memoize 1 (
   def plan =
     makeManualPlan cmd inputs fnoutputs
     | setPlanFnInputs (\_ inputs | map getPathName)
+    | setPlanResources ("python/python/3.7.1", Nil)
     | runJob
   def outputs = plan.getJobOutputs
   def findjson = outputs | filter (matches configFilename _.getPathName)

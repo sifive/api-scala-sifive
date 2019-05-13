@@ -24,6 +24,8 @@ import zipfile
 from tempfile import TemporaryDirectory
 import itertools
 
+from filelock import FileLock
+
 if sys.version_info[0] < 3 or sys.version_info[1] < 5:
     print("This program requires Python version 3.5 or newer!")
     sys.exit(1)
@@ -40,7 +42,8 @@ def timeout_exe():
 
 
 def bloop_exe(directory):
-    return "{}/bloop".format(directory)
+    with FileLock("{}/.lock".format(directory)):
+        return "{}/bloop".format(directory)
 
 
 def bloop_launcher(directory):
