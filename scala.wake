@@ -49,9 +49,6 @@ def ivyDepToCoursierCache dep =
 
 def cmpIvyCachePair (Pair n1 _) (Pair n2 _) = n1 <=>* n2
 
-# Convert an IvyDep into the corresponding filename in coursier ivy cache
-def ivyDepToFilename (IvyDep _ name rev _) = "{name}-{rev}.jar"
-
 def getIvyDepJars filenames =
   def dummyPath = bloopWake # A explicitly dummy path
   def pairs = map (Pair _ dummyPath) filenames
@@ -186,6 +183,7 @@ tuple ScalaModule =
   # These operations could be expensive
   global FnGeneratedSources: Unit => List Path
   global ScalacOptions:      List String
+  global CompilerPlugins:    List IvyDep
 
 def addSBTDefaults module =
   def sourceDirs = "src/main/scala", "src/main/java", _
@@ -195,7 +193,7 @@ def addSBTDefaults module =
   | editScalaModuleResourceDirs resourceDirs
 
 global def makeScalaModule name dir version =
-  ScalaModule name dir version Nil Nil Nil Nil (\_ Nil) Nil
+  ScalaModule name dir version Nil Nil Nil Nil (\_ Nil) Nil Nil
   | addSBTDefaults
 
 global def makeScalaModuleFromJSON dir name =
@@ -260,7 +258,6 @@ def inws path = "$WORKSPACE/{path}"
 
 # TODO implement scalacOptions
 def bloopScalaLibJSON scalaVersion scalacOptions =
-  def x → y = Pair x y
   def ivyDep = scalaCompilerIvyDep scalaVersion
   def ivyJars = resolveIvyDeps (ivyDep, Nil)
   def jars = ivyJars | map getPathName | map inws | map JString | JArray
@@ -289,9 +286,8 @@ def bloopOutDir module = "{bloopDir.getPathName}/{module.getScalaModuleName}"
 def moduleClassesDir module = "{module.buildDir}/classes"
 
 def bloopScalaModuleJSON module = match module
-  ScalaModule name dir ver _ modDeps _ _ _ scalacOpts =
+  ScalaModule name dir ver _ modDeps _ _ _ _ plugins =
     def bloopVersion = "1.2.5"
-    def x → y = Pair x y
     def myDir = bloopOutDir module
     def ivyDeps = module.getScalaModuleTransIvyDeps
     def deps = map (expandIvyDep ver) ivyDeps
@@ -302,6 +298,12 @@ def bloopScalaModuleJSON module = match module
     def genSrcs = module.getScalaModuleGeneratedSources
     def sources = module.getScalaModuleExpandedSourceDirs ++ (map getPathName genSrcs)
     def resources = module.getScalaModuleExpandedResourceDirs
+    def scalacOpts =
+      def user = module.getScalaModuleScalacOptions
+      def pluginOpts =
+        def getPluginPath dep = expandIvyDep ver dep | getIvyDepJar | getPathName | inws
+        plugins | map getPluginPath | map ("-Xplugin:{_}")
+      user ++ pluginOpts
     JObject (
       "version" → JString bloopVersion,
       "project" → JObject (
