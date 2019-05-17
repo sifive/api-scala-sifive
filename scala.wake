@@ -310,7 +310,9 @@ def bloopScalaModuleJSON module = match module
         "name" → JString name,
         "directory" → JString dir.inws,
         "sources" → sources | map inws | map JString | JArray,
-        "dependencies" → map getScalaModuleName modDeps | map JString | JArray,
+        # Until bloop incremental compilation works when invoked as CLI, lie about dependencies
+        #"dependencies" → map getScalaModuleName modDeps | map JString | JArray,
+        "dependencies" → JArray Nil,
         "classpath" → ivyClasspath ++ depClasspath | map inws | map JString | JArray,
         "out" → module.bloopOutDir.inws | JString,
         "classesDir" → module.moduleClassesDir.inws | JString,
@@ -355,14 +357,13 @@ def memoizeBloopCompile name module = memoize 1 (
       unmanaged ++ resources ++ auto
     def depJars = map compileScalaModule transDeps
     def configs = map bloopConfig transDeps
-    def timeout = sources here "bloop_timeout" | head
-    bin, timeout, bloopWake, configTemplate, configs ++ depJars ++ sourceFiles
+    bin, bloopWake, configTemplate, configs ++ depJars ++ sourceFiles
   def bloopArgs =
     def args = "compile", "-c", bloopDir.getPathName, module.getScalaModuleName, Nil
     args | catWith " "
   def cmd =
-    bin.getPathName, "-t", configTemplate.getPathName, "-c", configFilename
-    , "-b", bloopInstall, "--bloop-args", bloopArgs, "--jar", jarName, Nil
+    bin.getPathName, "-t", configTemplate.getPathName, "-c", configFilename , "-b", bloopInstall
+    , "--coursier-cache", ivyCache, "--bloop-args", bloopArgs, "--jar", jarName, Nil
   def fnoutputs _ = configFilename, jarName, Nil
   def plan =
     makeManualPlan cmd inputs fnoutputs
