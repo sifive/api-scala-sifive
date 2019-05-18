@@ -24,7 +24,7 @@ import zipfile
 import itertools
 
 # Import scalaplugin from wit
-sys.path.append("../wit/lib")
+sys.path.append("wit/lib")
 import scalaplugin
 
 if sys.version_info[0] < 3 or sys.version_info[1] < 5:
