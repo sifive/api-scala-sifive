@@ -368,6 +368,7 @@ def memoizeBloopCompile name module = memoize 1 (
   def plan =
     makeManualPlan cmd inputs fnoutputs
     | setPlanFnInputs (\_ inputs | map getPathName)
+    | editPlanEnvironment ("JAVA_OPTS=-Xss8M", _)
     | runJob
   def outputs = plan.getJobOutputs
   def findjson = outputs | filter (matches configFilename _.getPathName)
