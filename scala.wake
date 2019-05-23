@@ -11,17 +11,18 @@ def ivyCache = "ivycache"
 def bloopWake = source "{here}/bloop_wake"
 
 global def readIvyDepsJSON dir =
-  source "{dir}/ivydependencies.json" | getPathName | parseJSONFile
+  source "{dir}/ivydependencies.json" | parseJSONFile
 
 # Should be installed by wit
 def coursierBin =
-  def bins = files bloopInstall '.*coursier.*'
-  def bin = bins | head | makeStatePath
-  try (\_ raise "Coursier not found! Did you run `wit fetch-scala`?") bin
+  match (files bloopInstall `.*coursier.*`)
+    bin, Nil = makeStatePath bin
+    Nil      = makeBadJob (makeError "Coursier not found! Did you run `wit fetch-scala`?")
+    l        = makeBadJob (makeError "Multiple coursier executables found! {catWith ", " l}")
 
 # Virtual job that owns all fetched ivy dependencies
 def ivyCacheDeps Unit =
-  def fs = files ivyCache '.*'
+  def fs = files ivyCache `.*`
   makePlan ("<ivycache>", ivyCache, Nil) Nil
   | setPlanKeep      False
   | setPlanFnOutputs (\_ fs)
@@ -30,22 +31,20 @@ def ivyCacheDeps Unit =
 
 # Memoized tree for converting from Strings to Paths to jars in Coursier cache
 def ivyCacheJars Unit = memoize 0 (
-  def isJar = matches '.*\.jar' _.getPathName
+  def isJar = matches `.*\.jar` _.getPathName
   ivyCacheDeps Unit
   | filter isJar
-  | map (\p Pair p.getPathName.stripIvyPathPrefix p)
+  | mapPartial (\p p.getPathName.stripIvyPathPrefix | omap (Pair _ p))
   | listToTree cmpIvyCachePair
 )
 
 # TODO This is kind of sketchy, are releases and maven2 sufficient?
 def stripIvyPathPrefix name =
-  extract '.*?/(?:releases|maven2)/(.*)' name | head
+  extract `.*?/(?:releases|maven2)/(.*)` name | head
 
-def ivyDepToCoursierCache dep =
-  match dep.requireExpanded
-    IvyDep org name rev _ =
-      def prefix = replace '\.' '/' org
-      "{prefix}/{name}/{rev}/{name}-{rev}.jar"
+def ivyDepToCoursierCache (IvyDep org name rev) =
+  def prefix = replace `\.` '/' org
+  "{prefix}/{name}/{rev}/{name}-{rev}.jar"
 
 def cmpIvyCachePair (Pair n1 _) (Pair n2 _) = n1 <=>* n2
 
@@ -59,14 +58,12 @@ def getIvyDepJars filenames =
 # Returns a Path
 global def getIvyDepJar dep =
   def err Unit =
-    raise "{dep.ivyDepToString} not found in downloaded ivy dependencies! Did you run `wit fetch-scala`?"
-  match (getIvyDepJars (dep.requireExpanded.ivyDepToCoursierCache, Nil))
+    makeBadJob (makeError "{dep.ivyDepToString} not found in downloaded ivy dependencies! Did you run `wit fetch-scala`?")
+  def ivyDeps = getIvyDepJars (dep.ivyDepToCoursierCache, Nil)
+  match ivyDeps
     value, Nil = value
     Nil        = err Unit
-    _          = raise "This shouldn't be possible"
-
-def requireExpanded dep =
-  if dep.isIvyDepExpanded then dep else raise "Unexpanded IvyDep '{dep.ivyDepToString}'"
+    l          = panic "Found multiple jars for {dep.ivyDepToString}: {format l}"
 
 # TODO
 # - Can we make this a fuse job? For some reason coursier can't find visible inputs
@@ -74,23 +71,29 @@ def requireExpanded dep =
 # Given List IvyDep, returns List Path
 # Returns paths to dep jars and transitive dependencies
 global def resolveIvyDeps deps =
-  def depStrs = map (_.requireExpanded.ivyDepToString) deps
+  def depStrs = map ivyDepToString deps
   def cachedDeps = ivyCacheDeps Unit
-  def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache, "-m", "offline", depStrs
-  def plan = makeManualPlan cmd (coursierBin, cachedDeps) (\_ Nil)
-  def job = plan.runJob # pointless
+  def job =
+    def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache, "-m", "offline", depStrs
+    makePlan cmd (coursierBin, cachedDeps)
+    | setPlanLocalOnly True
+    | runJob
   def strs =
-    if job.getJobStatus == 0
-    then job.getJobStdout | tokenize '\n' | filter (_ !=* "")
-    else raise "Cannot resolve ivy dependencies, have you run `wit fetch-scala`?"
+    job
+    | getJobStdout
+    | rmap (tokenize `\n` _ | filter (_ !=* ""))
   # Using the output of coursier, we get the actual paths and filter into requested and transitive
-  def filenames = map stripIvyPathPrefix strs
-  def res = getIvyDepJars filenames
-  def err Unit =
-    def fns = catWith ", " filenames
-    def paths = res | map format | catWith ", "
-    raise "Something went wrong! Looking for {fns}, got wrong number of paths: {paths}"
-  if res.len != filenames.len then (err Unit) else res
+  def stripPrefix str = stripIvyPathPrefix str | getOrFail (makeError "Could not strip ivy path prefix of '{str}'!")
+  def filenames = strs | rmapPass (findFailFn stripPrefix _)
+  def err paths names =
+    def fns = catWith ", " names
+    def ps = paths | map format | catWith ", "
+    makeBadJob (makeError "Something went wrong! Looking for {fns}, got wrong number of paths: {ps}"), Nil
+  match filenames
+    Fail err = makeBadJob err, Nil
+    Pass fns =
+      def jars = getIvyDepJars fns
+      if jars.len != fns.len then err jars fns else jars
 
 
 # TODO improve
@@ -117,11 +120,18 @@ global def scalaVersionToString (ScalaVersion major minor) =
 global def scalaVersionMajorString (ScalaVersion major _) =
   "2.{str major}"
 
+
 global def stringToScalaVersion str =
-  match (tokenize '\.' str)
-    "2", major, minor, Nil =
-      (ScalaVersion _ _) | reraise (int major) | reraise (int minor)
-    _ = raise "Only Scala 2.X.Y accepted, got '{str}'"
+  match (tokenize `\.` str)
+    "2", major, minor, Nil = match (int major) (int minor)
+      (Some maj) (Some min) = Some (ScalaVersion maj min)
+      _ _                   = None
+    _ = None
+
+global def stringToScalaVersionResult str =
+  match (stringToScalaVersion str)
+    Some ver = Pass ver
+    None     = Fail (makeError "Invalid ScalaVersion string {str}")
 
 global data ScalaCrossVersion =
   Constant
@@ -129,53 +139,51 @@ global data ScalaCrossVersion =
   Minor
 
 # TODO additional resolvers/repositories
-# Should the cross versions be factored out?
 tuple IvyDep =
+  global Org:          String
+  global Name:         String
+  global Rev:          String
+
+tuple UnexpandedIvyDep =
   global Org:          String
   global Name:         String
   global Rev:          String
   global CrossVersion: ScalaCrossVersion
 
-# TODO should this exist?
-tuple UnexpandedIvyDep =
-  global Dep:          IvyDep
-  global CrossVersion: ScalaCrossVersion
-
-
 # rename stringToIvyDep
 global def stringToIvyDep string =
-  match (tokenize ':' string)
-    org, name, rev, Nil         = IvyDep org name rev Constant
-    org, "", name, rev, Nil     = IvyDep org name rev Major
-    org, "", "", name, rev, Nil = IvyDep org name rev Minor
-    _                           = raise "Malformed Ivy Dep '{string}'"
+  match (tokenize `:` string)
+    org, name, rev, Nil         = Some (UnexpandedIvyDep org name rev Constant)
+    org, "", name, rev, Nil     = Some (UnexpandedIvyDep org name rev Major)
+    org, "", "", name, rev, Nil = Some (UnexpandedIvyDep org name rev Minor)
+    _                           = None
 
-global def ivyDepToString dep = match dep
-  IvyDep org name rev cross = match cross
-    Constant = "{org}:{name}:{rev}"
-    Major    = "{org}::{name}:{rev}"
-    Minor    = "{org}:::{name}:{rev}"
+def ivyDepToString (IvyDep org name rev) = "{org}:{name}:{rev}"
 
-global def expandIvyDep version dep = match dep
-  IvyDep org name rev cross = match cross
-    Constant = dep
-    Major    = IvyDep org "{name}_{scalaVersionMajorString version}" rev Constant
-    Minor    = IvyDep org "{name}_{scalaVersionToString version}" rev Constant
+def unexpandedIvyDepToString (UnexpandedIvyDep org name rev cross) = match cross
+  Constant = "{org}:{name}:{rev}"
+  Major    = "{org}::{name}:{rev}"
+  Minor    = "{org}:::{name}:{rev}"
 
-global def isIvyDepExpanded dep = match dep.getIvyDepCrossVersion
-  Constant = True
-  _        = False
+global def expandIvyDep version (UnexpandedIvyDep org name rev cross) = match cross
+  Constant = IvyDep org name rev
+  Major    = IvyDep org "{name}_{scalaVersionMajorString version}" rev
+  Minor    = IvyDep org "{name}_{scalaVersionToString version}" rev
+
+global def expandJavaIvyDep (UnexpandedIvyDep org name rev cross) = match cross
+  Constant = Some (IvyDep org name rev)
+  _        = None
 
 global def scalaCompilerIvyDep version =
-  IvyDep "org.scala-lang" "scala-compiler" (scalaVersionToString version) Constant
+  IvyDep "org.scala-lang" "scala-compiler" version.scalaVersionToString
 global def scalaLibraryIvyDep version =
-  IvyDep "org.scala-lang" "scala-library" (scalaVersionToString version) Constant
+  IvyDep "org.scala-lang" "scala-library" version.scalaVersionToString
 
 tuple ScalaModule =
   global Name:               String
   global RootDir:            String
   global ScalaVersion:       ScalaVersion
-  global IvyDeps:            List IvyDep
+  global IvyDeps:            List UnexpandedIvyDep
   global Deps:               List ScalaModule
   # These are relative to RootDir
   global SourceDirs:         List String
@@ -183,7 +191,9 @@ tuple ScalaModule =
   # These operations could be expensive
   global FnGeneratedSources: Unit => List Path
   global ScalacOptions:      List String
-  global CompilerPlugins:    List IvyDep
+  global CompilerPlugins:    List UnexpandedIvyDep
+  # We propogate errors
+  global Error:              Option Error
 
 def addSBTDefaults module =
   def sourceDirs = "src/main/scala", "src/main/java", _
@@ -192,25 +202,45 @@ def addSBTDefaults module =
   | editScalaModuleSourceDirs sourceDirs
   | editScalaModuleResourceDirs resourceDirs
 
+global def scalaModuleToResult module =
+  match module.getScalaModuleError
+    None       = Pass module
+    Some error = Fail error
+
 global def makeScalaModule name dir version =
-  ScalaModule name dir version Nil Nil Nil Nil (\_ Nil) Nil Nil
+  ScalaModule name dir version Nil Nil Nil Nil (\_ Nil) Nil Nil None
   | addSBTDefaults
 
+# TODO clean up
 global def makeScalaModuleFromJSON dir name =
-  def json = readIvyDepsJSON dir
+  def jsonProj =
+    dir.readIvyDepsJSON
+    | rmap (_ // name.quote)
+    | rmapFail (makeError _ | Fail)
   def scalaVersion =
-    json // name // "scalaVersion"
-    | getJString
-    | getOrElse (raise "scalaVersion not found!")
-    | stringToScalaVersion
+    def helper json =
+      json // `scalaVersion`
+      | getJString
+      | getOrFail (makeError "scalaVersion not found!")
+      | rmapPass stringToScalaVersionResult
+    jsonProj | rmapPass helper
   def ivyDeps =
-    json // name // "dependencies"
-    | getJArray
-    | getOrElse Nil
-    | mapPartial getJString
-    | map stringToIvyDep
-  makeScalaModule name dir scalaVersion
-  | setScalaModuleIvyDeps ivyDeps
+    def helper json =
+      json // `dependencies`
+      | getJArray
+      | getOrElse Nil
+      | mapPartial getJString
+      | map (\x stringToIvyDep x | getOrFail (makeError "Malformed IvyDep '{x}'"))
+      | findFail
+    jsonProj | rmapPass helper
+  match scalaVersion ivyDeps
+    (Pass ver) (Pass deps) = makeScalaModule name dir ver | setScalaModuleIvyDeps deps
+    (Fail err) _           = makeBadScalaModule err
+    _          (Fail err)  = makeBadScalaModule err
+
+def makeBadScalaModule error =
+  makeScalaModule "BAD_SCALA_MODULE" "/dev/null" (ScalaVersion 0 0)
+  | setScalaModuleError (Some error)
 
 def compareScalaModules a b =
   a.getScalaModuleName <=>* b.getScalaModuleName
@@ -231,27 +261,24 @@ def getScalaModuleExpandedResourceDirs module =
   map (simplify "{mroot}/{_}") module.getScalaModuleResourceDirs
 
 global def getScalaModuleTransDeps module =
+  def err Unit =
+    makeBadScalaModule (makeError "ScalaModule '{module.getScalaModuleName}' depends on itself!"), Nil
   def folder tree mod =
     foldl helper tree mod.getScalaModuleDeps
   def helper tree mod = match (mod ∈ tree)
     True = tree
     False = folder (tinsert mod tree) mod
   def tree = folder (tnew compareScalaModules) module
-  if module ∈ tree then raise "ScalaModule '{module.getScalaModuleName}' depends on itself!"
+  if module ∈ tree then err Unit
   else tree | treeToList
-
-def flip f a b = f b a
 
 # Excludes Scala itself
 # Does not run expand ivy dependencies, nor does it invoke coursier
 # TODO Make helper that takes an accumulator tree and checks if already present, returns if so, otherwise continues
 global def getScalaModuleTransIvyDeps module =
   def allMods = module, module.getScalaModuleTransDeps
-  def tree = tnew (_.ivyDepToString <=>* _.ivyDepToString)
-  map getScalaModuleIvyDeps allMods
-  | flatten
-  | foldl tinsert.flip tree
-  | treeToList
+  def cmp = _.unexpandedIvyDepToString <=>* _.unexpandedIvyDepToString
+  allMods | mapFlat getScalaModuleIvyDeps | distinctBy cmp
 
 # Prefix with wildcard for the workspace
 def inws path = "$WORKSPACE/{path}"
@@ -285,43 +312,45 @@ def buildDir module =
 def bloopOutDir module = "{bloopDir.getPathName}/{module.getScalaModuleName}"
 def moduleClassesDir module = "{module.buildDir}/classes"
 
-def bloopScalaModuleJSON module = match module
-  ScalaModule name dir ver _ modDeps _ _ _ _ plugins =
-    def bloopVersion = "1.2.5"
-    def myDir = bloopOutDir module
+# Assumes ScalaModule itself is valid
+def bloopScalaModuleJSON module =
+  def name = module.getScalaModuleName
+  def dir = module.getScalaModuleRootDir
+  def ver = module.getScalaModuleScalaVersion
+  def transDeps = module.getScalaModuleTransDeps
+  def ivyClasspath =
     def ivyDeps = module.getScalaModuleTransIvyDeps
     def deps = map (expandIvyDep ver) ivyDeps
-    def scalaCompiler = scalaCompilerIvyDep ver
-    def ivyClasspath = resolveIvyDeps (scalaCompiler, deps) | map getPathName
-    def transDeps = module.getScalaModuleTransDeps
-    def depClasspath = transDeps | map moduleClassesDir
-    def genSrcs = module.getScalaModuleGeneratedSources
-    def sources = module.getScalaModuleExpandedSourceDirs ++ (map getPathName genSrcs)
-    def resources = module.getScalaModuleExpandedResourceDirs
+    def scalaCompiler = module.getScalaModuleScalaVersion.scalaCompilerIvyDep
+    resolveIvyDeps (scalaCompiler, deps) | map getPathName
+  def scalaJSON =
     def scalacOpts =
-      def user = module.getScalaModuleScalacOptions
-      def pluginOpts =
-        def getPluginPath dep = expandIvyDep ver dep | getIvyDepJar | getPathName | inws
-        plugins | map getPluginPath | map ("-Xplugin:{_}")
-      user ++ pluginOpts
-    JObject (
-      "version" → JString bloopVersion,
-      "project" → JObject (
-        "name" → JString name,
-        "directory" → JString dir.inws,
-        "sources" → sources | map inws | map JString | JArray,
-        # Until bloop incremental compilation works when invoked as CLI, lie about dependencies
-        #"dependencies" → map getScalaModuleName modDeps | map JString | JArray,
-        "dependencies" → JArray Nil,
-        "classpath" → ivyClasspath ++ depClasspath | map inws | map JString | JArray,
-        "out" → module.bloopOutDir.inws | JString,
-        "classesDir" → module.moduleClassesDir.inws | JString,
-        "resources" → resources | map inws | map JString | JArray,
-        "scala" → bloopScalaLibJSON ver scalacOpts,
-        Nil
-      ),
+      def getPluginOpt dep = expandIvyDep ver dep | getIvyDepJar | getPathName | inws | ("-Xplugin:{_}")
+      module.getScalaModuleScalacOptions ++ (map getPluginOpt module.getScalaModuleCompilerPlugins)
+    bloopScalaLibJSON ver scalacOpts
+  def bloopVersion = "1.2.5"
+  def depClasspath = transDeps | map moduleClassesDir
+  def genSrcs = module.getScalaModuleGeneratedSources
+  def sources = module.getScalaModuleExpandedSourceDirs ++ (map getPathName genSrcs)
+  def resources = module.getScalaModuleExpandedResourceDirs
+  JObject (
+    "version" → JString bloopVersion,
+    "project" → JObject (
+      "name" → JString name,
+      "directory" → JString dir.inws,
+      "sources" → sources | map inws | map JString | JArray,
+      # Until bloop incremental compilation works when invoked as CLI, lie about dependencies
+      #"dependencies" → map getScalaModuleName modDeps | map JString | JArray,
+      "dependencies" → JArray Nil,
+      "classpath" → ivyClasspath ++ depClasspath | map inws | map JString | JArray,
+      "out" → module.bloopOutDir.inws | JString,
+      "classesDir" → module.moduleClassesDir.inws | JString,
+      "resources" → resources | map inws | map JString | JArray,
+      "scala" → scalaJSON,
       Nil
-    )
+    ),
+    Nil
+  )
 
 # TODO is this necessary anymore?
 def memoizeBloopTemplate name module = memoize 1 (
@@ -351,8 +380,8 @@ def memoizeBloopCompile name module = memoize 1 (
   def inputs =
     def sourceFiles =
       def dirs = module.getScalaModuleExpandedSourceDirs
-      def auto = map (sources _ '.*\.(scala|java)') dirs | flatten
-      def resources = map (sources _ '.*') module.getScalaModuleExpandedResourceDirs | flatten
+      def auto = map (sources _ `.*\.(scala|java)`) dirs | flatten
+      def resources = map (sources _ `.*`) module.getScalaModuleExpandedResourceDirs | flatten
       def unmanaged = module.getScalaModuleGeneratedSources
       unmanaged ++ resources ++ auto
     def depJars = map compileScalaModule transDeps
@@ -364,31 +393,39 @@ def memoizeBloopCompile name module = memoize 1 (
   def cmd =
     bin.getPathName, "-t", configTemplate.getPathName, "-c", configFilename , "-b", bloopInstall
     , "--coursier-cache", ivyCache, "--bloop-args", bloopArgs, "--jar", jarName, Nil
-  def fnoutputs _ = configFilename, jarName, Nil
   def plan =
-    makeManualPlan cmd inputs fnoutputs
-    | setPlanFnInputs (\_ inputs | map getPathName)
+    makePlan cmd inputs
     | editPlanEnvironment ("JAVA_OPTS=-Xss8M", _)
+    | setPlanFnInputs (\_ inputs | map getPathName)
+    | setPlanLocalOnly True
+    | setPlanFnOutputs (\_ configFilename, jarName, Nil)
     | runJob
-  def outputs = plan.getJobOutputs
-  def findjson = outputs | filter (matches configFilename _.getPathName)
-  def findjar = outputs | filter (matches jarName _.getPathName)
-  match findjson findjar
-    (json, Nil) (jar, Nil) = Pair json jar
-    _ _ = raise "Expected exactly one json and one jar, got {format outputs}"
+  def err paths = Fail (makeError "Expected exactly one json and one jar, got {format paths}")
+  def result = match plan.getJobOutputs
+    json, jar, Nil = Pass (Pair json jar)
+    # If the job fails, it returns 1 BadPath
+    one, Nil       = one.getPathError | omap Fail | getOrElse (err (one, Nil))
+    l              = err l
+  # Compose possible errors
+  module.scalaModuleToResult
+  | rmapPass (\_ result)
 )
 def bloopCompile module = memoizeBloopCompile module.getScalaModuleName module
 
-def bloopConfig module = bloopCompile module | getPairFirst
+def bloopConfig module = match module.bloopCompile
+  Pass (Pair f _) = f
+  Fail err        = makeBadJob err
 
-global def compileScalaModule module = bloopCompile module | getPairSecond
+global def compileScalaModule module = match module.bloopCompile
+  Pass (Pair _ s) = s
+  Fail err        = makeBadJob err
 
 # Returns the full classpath to run the module
 global def scalaModuleClasspath module =
   def version = module.getScalaModuleScalaVersion
   def scalaIvyDep = scalaCompilerIvyDep version
   def ivyJars =
-    def ivyDeps = (scalaIvyDep, module.getScalaModuleTransIvyDeps) | map (expandIvyDep version)
-    resolveIvyDeps ivyDeps
+    def ivyDeps = module.getScalaModuleTransIvyDeps | map (expandIvyDep version)
+    resolveIvyDeps (scalaIvyDep, ivyDeps)
   def moduleJars = (module, module.getScalaModuleTransDeps) | map compileScalaModule
   moduleJars ++ ivyJars
