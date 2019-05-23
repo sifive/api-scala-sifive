@@ -15,10 +15,10 @@ global def readIvyDepsJSON dir =
 
 # Should be installed by wit
 def coursierBin =
-  files bloopInstall `.*coursier.*`
-  | head
-  | omap makeStatePath
-  | getOrElse (makeBadJob (makeError "Coursier not found! Did you run `wit fetch-scala`?"))
+  match (files bloopInstall `.*coursier.*`)
+    bin, Nil = makeStatePath bin
+    Nil      = makeBadJob (makeError "Coursier not found! Did you run `wit fetch-scala`?")
+    l        = makeBadJob (makeError "Multiple coursier executables found! {catWith ", " l}")
 
 # Virtual job that owns all fetched ivy dependencies
 def ivyCacheDeps Unit =
@@ -77,7 +77,6 @@ global def resolveIvyDeps deps =
     def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache, "-m", "offline", depStrs
     makePlan cmd (coursierBin, cachedDeps)
     | setPlanLocalOnly True
-    | setPlanFnOutputs (\_ Nil)
     | runJob
   def strs =
     job
@@ -86,7 +85,6 @@ global def resolveIvyDeps deps =
   # Using the output of coursier, we get the actual paths and filter into requested and transitive
   def stripPrefix str = stripIvyPathPrefix str | getOrFail (makeError "Could not strip ivy path prefix of '{str}'!")
   def filenames = strs | rmapPass (findFailFn stripPrefix _)
-  #def filenames = map stripIvyPathPrefix strs
   def err paths names =
     def fns = catWith ", " names
     def ps = paths | map format | catWith ", "
@@ -195,7 +193,6 @@ tuple ScalaModule =
   global ScalacOptions:      List String
   global CompilerPlugins:    List UnexpandedIvyDep
   # We propogate errors
-  # TODO should this be global?
   global Error:              Option Error
 
 def addSBTDefaults module =
@@ -396,23 +393,19 @@ def memoizeBloopCompile name module = memoize 1 (
   def cmd =
     bin.getPathName, "-t", configTemplate.getPathName, "-c", configFilename , "-b", bloopInstall
     , "--coursier-cache", ivyCache, "--bloop-args", bloopArgs, "--jar", jarName, Nil
-  def fnoutputs _ = configFilename, jarName, Nil
   def plan =
     makePlan cmd inputs
     | editPlanEnvironment ("JAVA_OPTS=-Xss8M", _)
     | setPlanFnInputs (\_ inputs | map getPathName)
     | setPlanLocalOnly True
-    | setPlanFnOutputs fnoutputs
+    | setPlanFnOutputs (\_ configFilename, jarName, Nil)
     | runJob
-  def outputs = plan.getJobOutputs
-  # TODO switch back to relying on order
-  def findjson = outputs | filter (matches configFilename.quote _.getPathName)
-  def findjar = outputs | filter (matches jarName.quote _.getPathName)
-  def result = match (plan.getJobReport)
-    Fail err = Fail err
-    Pass _   = match findjson findjar
-      (json, Nil) (jar, Nil) = Pass (Pair json jar)
-      _ _ = Fail (makeError "Expected exactly one json and one jar, got {format outputs}")
+  def err paths = Fail (makeError "Expected exactly one json and one jar, got {format paths}")
+  def result = match plan.getJobOutputs
+    json, jar, Nil = Pass (Pair json jar)
+    # If the job fails, it returns 1 BadPath
+    one, Nil       = one.getPathError | omap Fail | getOrElse (err (one, Nil))
+    l              = err l
   # Compose possible errors
   module.scalaModuleToResult
   | rmapPass (\_ result)
