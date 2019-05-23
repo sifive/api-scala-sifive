@@ -167,11 +167,14 @@ def unexpandedIvyDepToString (UnexpandedIvyDep org name rev cross) = match cross
   Major    = "{org}::{name}:{rev}"
   Minor    = "{org}:::{name}:{rev}"
 
-
 global def expandIvyDep version (UnexpandedIvyDep org name rev cross) = match cross
   Constant = IvyDep org name rev
   Major    = IvyDep org "{name}_{scalaVersionMajorString version}" rev
   Minor    = IvyDep org "{name}_{scalaVersionToString version}" rev
+
+global def expandJavaIvyDep (UnexpandedIvyDep org name rev cross) = match cross
+  Constant = Some (IvyDep org name rev)
+  _        = None
 
 global def scalaCompilerIvyDep version =
   IvyDep "org.scala-lang" "scala-compiler" version.scalaVersionToString
