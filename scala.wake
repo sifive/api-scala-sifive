@@ -17,8 +17,8 @@ global def readIvyDepsJSON dir =
 def coursierBin =
   match (files bloopInstall `.*coursier.*`)
     bin, Nil = makeStatePath bin
-    Nil      = makeBadJob (makeError "Coursier not found! Did you run `wit fetch-scala`?")
-    l        = makeBadJob (makeError "Multiple coursier executables found! {catWith ", " l}")
+    Nil      = makeBadPath (makeError "Coursier not found! Did you run `wit fetch-scala`?")
+    l        = makeBadPath (makeError "Multiple coursier executables found! {catWith ", " l}")
 
 # Virtual job that owns all fetched ivy dependencies
 def ivyCacheDeps Unit =
@@ -58,7 +58,7 @@ def getIvyDepJars filenames =
 # Returns a Path
 global def getIvyDepJar dep =
   def err Unit =
-    makeBadJob (makeError "{dep.ivyDepToString} not found in downloaded ivy dependencies! Did you run `wit fetch-scala`?")
+    makeBadPath (makeError "{dep.ivyDepToString} not found in downloaded ivy dependencies! Did you run `wit fetch-scala`?")
   def ivyDeps = getIvyDepJars (dep.ivyDepToCoursierCache, Nil)
   match ivyDeps
     value, Nil = value
@@ -88,9 +88,9 @@ global def resolveIvyDeps deps =
   def err paths names =
     def fns = catWith ", " names
     def ps = paths | map format | catWith ", "
-    makeBadJob (makeError "Something went wrong! Looking for {fns}, got wrong number of paths: {ps}"), Nil
+    makeBadPath (makeError "Something went wrong! Looking for {fns}, got wrong number of paths: {ps}"), Nil
   match filenames
-    Fail err = makeBadJob err, Nil
+    Fail err = makeBadPath err, Nil
     Pass fns =
       def jars = getIvyDepJars fns
       if jars.len != fns.len then err jars fns else jars
@@ -413,11 +413,11 @@ def bloopCompile module = memoizeBloopCompile module.getScalaModuleName module
 
 def bloopConfig module = match module.bloopCompile
   Pass (Pair f _) = f
-  Fail err        = makeBadJob err
+  Fail err        = makeBadPath err
 
 global def compileScalaModule module = match module.bloopCompile
   Pass (Pair _ s) = s
-  Fail err        = makeBadJob err
+  Fail err        = makeBadPath err
 
 # Returns the full classpath to run the module
 global def scalaModuleClasspath module =
