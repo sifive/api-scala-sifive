@@ -216,7 +216,6 @@ global def makeScalaModuleFromJSON dir name =
   def jsonProj =
     dir.readIvyDepsJSON
     | rmap (_ // name.quote)
-    | rmapFail (makeError _ | Fail)
   def scalaVersion =
     def helper json =
       json // `scalaVersion`
