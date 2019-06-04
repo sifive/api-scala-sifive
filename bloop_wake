@@ -62,11 +62,21 @@ def get_bloop_artifacts():
     return allDeps
 
 
-def run_bloop(coursier, cache, args):
-    arglist = args.split()
+def bloop_classpath(coursier, cache):
     deps = get_bloop_artifacts()
-    cmd = [coursier, "launch", "-m", "offline", "--cache", cache] + deps + \
-          ["-M", "bloop.Cli", "--"] + arglist
+    cmd = [coursier, "fetch", "-m", "offline", "--classpath", "--cache", cache] + deps
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, universal_newlines=True)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.rstrip()
+
+
+def run_bloop(coursier, cache, args):
+    classpath = bloop_classpath(coursier, cache)
+    if classpath is None:
+        return 1
+    arglist = args.split()
+    cmd = ["java", "-Xss8M", "-cp", classpath, "bloop.Cli"] + arglist
     proc = subprocess.run(cmd)
     return proc.returncode == 0
 
