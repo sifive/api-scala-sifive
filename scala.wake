@@ -114,6 +114,9 @@ tuple ScalaVersion =
   global Major: Integer
   global Minor: Integer
 
+global def makeScalaVersion major minor =
+  ScalaVersion major minor
+
 global def scalaVersionToString (ScalaVersion major minor) =
   "2.{str major}.{str minor}"
 
