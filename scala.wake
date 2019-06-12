@@ -30,13 +30,12 @@ def ivyCacheDeps Unit =
   | getJobOutputs
 
 # Memoized tree for converting from Strings to Paths to jars in Coursier cache
-def ivyCacheJars Unit = memoize 0 (
+target ivyCacheJars Unit =
   def isJar = matches `.*\.jar` _.getPathName
   ivyCacheDeps Unit
   | filter isJar
   | mapPartial (\p p.getPathName.stripIvyPathPrefix | omap (Pair _ p))
   | listToTree cmpIvyCachePair
-)
 
 # TODO This is kind of sketchy, are releases and maven2 sufficient?
 def stripIvyPathPrefix name =
@@ -247,9 +246,8 @@ def makeBadScalaModule error =
 def compareScalaModules a b =
   a.getScalaModuleName <=>* b.getScalaModuleName
 
-def memoizeGenSrcs name module = memoize 1 (
+target memoizeGenSrcs name \ module =
   module.getScalaModuleFnGeneratedSources Unit
-)
 global def getScalaModuleGeneratedSources module =
   memoizeGenSrcs module.getScalaModuleName module
 
@@ -355,10 +353,9 @@ def bloopScalaModuleJSON module =
   )
 
 # TODO is this necessary anymore?
-def memoizeBloopTemplate name module = memoize 1 (
+target memoizeBloopTemplate name \ module =
   def content = bloopScalaModuleJSON module | prettyJSON
   write (bloopTemplateName module) content
-)
 def bloopTemplate module =
   memoizeBloopTemplate module.getScalaModuleName module
 
@@ -371,7 +368,7 @@ def bloopConfigName module =
   "{bloopDir.getPathName}/{name}.json"
 
 # Compiles a ScalaModule, returns bloop config and generated jar file
-def memoizeBloopCompile name module = memoize 1 (
+target memoizeBloopCompile name \ module =
   def statedir = mkdir module.bloopOutDir
   def bin = bloopWake
   def transDeps = module.getScalaModuleTransDeps
@@ -411,7 +408,6 @@ def memoizeBloopCompile name module = memoize 1 (
   # Compose possible errors
   module.scalaModuleToResult
   | rmapPass (\_ result)
-)
 def bloopCompile module = memoizeBloopCompile module.getScalaModuleName module
 
 def bloopConfig module = match module.bloopCompile
