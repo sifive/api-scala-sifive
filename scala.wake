@@ -9,6 +9,8 @@ def bloopInstall = "scala"
 def ivyCache = "ivycache"
 # Python wrapper script for invoking bloop
 def bloopWake = source "{here}/bloop_wake"
+# Where we expect to find wit/scalaplugin.py
+def scalaPluginPath = "wit/lib"
 
 global def readIvyDepsJSON dir =
   source "{dir}/ivydependencies.json" | parseJSONFile
@@ -394,7 +396,7 @@ target memoizeBloopCompile name \ module =
     , "--coursier-cache", ivyCache, "--bloop-args", bloopArgs, "--jar", jarName, Nil
   def plan =
     makePlan cmd inputs
-    | editPlanEnvironment ("JAVA_OPTS=-Xss8M", _)
+    | editPlanEnvironment ("JAVA_OPTS=-Xss8M", "PYTHONPATH={scalaPluginPath}", _)
     | setPlanFnInputs (\_ inputs | map getPathName)
     | setPlanLocalOnly True
     | setPlanFnOutputs (\_ configFilename, jarName, Nil)

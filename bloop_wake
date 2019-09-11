@@ -23,9 +23,12 @@ import json
 import zipfile
 import itertools
 
-# Import scalaplugin from wit
-sys.path.append("wit/lib")
-from wit import scalaplugin
+try:
+    from wit import scalaplugin
+except ModuleNotFoundError:
+    print("Scala plugin not found!", file=sys.stderr)
+    print("  Likely cause: wit/ directory not found in the workspace! Try `wit update`.", file=sys.stderr)
+    raise
 
 if sys.version_info[0] < 3 or sys.version_info[1] < 5:
     print("This program requires Python version 3.5 or newer!")
