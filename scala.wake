@@ -7,6 +7,9 @@ def bloopDir = mkdir "{root.getPathName}/bloop"
 def bloopInstall = "scala"
 # Where I expect Scala Ivy dependencies to be downloaded
 def ivyCache = "ivycache"
+# Where I expected the Scala compiler bridge
+# Ideally this would live in the normal ivycache
+def compilerBridgeDir = "scala/bloop_home"
 # Python wrapper script for invoking bloop
 def bloopWake = source "{here}/bloop_wake"
 # Where we expect to find wit/scalaplugin.py
@@ -387,7 +390,9 @@ target memoizeBloopCompile name \ module =
       unmanaged ++ resources ++ auto
     def depJars = map compileScalaModule transDeps
     def configs = map bloopConfig transDeps
-    bin, bloopWake, configTemplate, configs ++ depJars ++ sourceFiles
+    def witSources = sources scalaPluginPath `.*\.py`
+    def compilerBridgeFiles = files compilerBridgeDir `.*` | map makeStatePath
+    bin, bloopWake, coursierBin, configTemplate, witSources ++ configs ++ depJars ++ sourceFiles ++ (ivyCacheDeps Unit) ++ compilerBridgeFiles
   def bloopArgs =
     def args = "compile", "-c", bloopDir.getPathName, module.getScalaModuleName, Nil
     args | catWith " "
@@ -398,7 +403,6 @@ target memoizeBloopCompile name \ module =
     makePlan cmd inputs
     | editPlanEnvironment ("JAVA_OPTS=-Xss8M", "PYTHONPATH={scalaPluginPath}", _)
     | setPlanFnInputs (\_ inputs | map getPathName)
-    | setPlanLocalOnly True
     | setPlanFnOutputs (\_ configFilename, jarName, Nil)
     | runJob
   def err paths = Fail (makeError "Expected exactly one json and one jar, got {format paths}")
