@@ -1,0 +1,185 @@
+= Wake Scala API
+:toc:
+:toc-placement!:
+
+https://github.com/sifive/wake[Wake] build rules for building https://www.scala-lang.org/[Scala] projects.
+Integrated with https://github.com/sifive/wit[Wit] for dependency fetching and resolution.
+
+toc::[]
+
+[#dep-resolution]
+== Dependency Fetching and Resolution
+
+Wit has a plugin for fetching Scala as well as standard Maven dependencies.
+
+[#ivy-deps-json]
+=== ivydependencies.json
+
+Dependencies are specified with the file called `ivydependencies.json`.
+For example, consider the `ivydependencies.json` file from this repository:
+
+.ivydependencies.json
+[source,json]
+----
+{
+  "bloop": {
+    "scalaVersion": "2.12.8",
+    "dependencies": [
+        "ch.epfl.scala::bloop-frontend:1.2.5",
+        "ch.epfl.scala::bsp4s:2.0.0-M3"
+      ]
+  }
+}
+----
+
+The format is a JSON object where the outer key is the name of a given Scala project.
+You can specify multiple projects that may have their own dependencies.
+A project is composed of several fields, all of which are optional (although having no fields would not be particularly useful).
+
+==== scalaVersion
+
+Specifies the Scala Version.
+This is used for fetching Scala itself as well as filling in the Scala version in maven dependencies (more on that later).
+
+==== dependencies
+
+Dependencies follow the same standard as https://get-coursier.io/[Coursier].
+
+Standard Java dependencies are of the form `<groupID>:<artifactID>:<revision>`.
+Because Scala does not maintain binary compatibility between major versions,
+Scala dependencies are specified with two colons after `groupID`: `<groupID>::<artifactID>:<revision>`.
+Such dependencies are automatically expanded to `<groupID>:<artifactID>_<scala major version>:<revision>`.
+
+For example, since `scalaVersion` is `"2.12.8"` in this project,
+`"ch.epfl.scala::bloop-frontend:1.2.5"` is expanded to `"ch.epfl.scala:bloop-frontend_2.12:1.2.5"`.
+This allows us to bump the Scala version without having to update every single Scala dependency.
+
+For Scala dependencies that break compatibility between Scala _minor_ versions, one can use three colons.
+For example, `"my.org:::cool-project:1.0.0"` would expand to `"my.org:cool-project_2.12.8:1.0.0"`.
+
+[#coursier]
+=== Coursier
+
+The Wit Scala Plugin uses https://get-coursier.io/[Coursier] to resolve and fetch dependencies.
+Of particular interest are Couriser environment variables that allow the user to control fetching and resolution.
+For example, by default, coursier only fetches from the local cache and maven central,
+but to enable additional repositories, one can set the `COURSIER_REPOSITORIES` environment variable.
+
+Please see linked Coursier documentation above for more information.
+
+== Wake API
+
+The Wake API is a set of Wake data structures and functions that allow Wake to build Scala projects.
+Similarly to the Wit Scala Plugin, the Wake build rules use <<coursier, Coursier>> to resolve dependencies;
+however, to enable offline use, the Wake rules disable _fetching_, delegating that responsibility to Wit.
+
+The primary data structure of Scala builds in Wake are `ScalaModules`
+(discussed in more detail <<scalamodule, later>>).
+Note that `ScalaModule` is a https://github.com/sifive/wake/blob/a0d99f15cf806f917d64714934d337b392d36f26/share/doc/wake/tour/tuples.adoc[Wake tuple]
+and using `ScalaModule` requires understanding tuples and their generated accessor functions.
+
+=== Usage
+
+==== Declaration
+
+To enable a DRY (Don't Repeate Yourself) build specification,
+Wake Scala build descriptions can be populated by a corresponding `ivydependencies.json`.
+
+The simplest `ScalaModule` is created by simply reading the JSON file:
+
+----
+global def exampleScalaModule = makeScalaModuleFromJSON here "example"
+----
+
+`makeScalaModuleFromJSON` takes two `String` arguments.
+The first is the directory where `ivydependencies.json` is expected to be found.
+`here` is a built-in function in Wake that refers to the directory where the Wake file exists.
+This directory will also be used as the <<root-dir, root directory>> of the created `ScalaModule`.
+The second argument is the name of the `ScalaModule` and must correspond to an outer key in the `ivydependencies.json` file.
+
+By default, `ScalaModules` look for sources and resources in the same default directories as SBT:
+`<root dir>/src/main/scala` and `<root dir>/src/main/java` for sources,
+`<root dir>/src/main/resources` for resources.
+
+You can always override these defaults by providing your own relative directories.
+For example, to use Mill's defaults of `src/` and `resources/`:
+
+----
+global def exampleScalaModule =
+  makeScalaModuleFromJSON here "example"
+  | setScalaModuleSourceDirs ("src", Nil)
+  | setScalaModuleResourceDirs ("resources", Nil)
+----
+
+Or to keep the SBT defaults but add `extra/sources` as an additional source directory:
+
+----
+global def exampleScalaModule =
+  makeScalaModuleFromJSON here "example"
+  | editScalaModuleSourceDirs ("extra/sources", _)
+----
+
+==== Dependencies
+
+Published dependencies are specified as <<ivy-deps-json, previously discussed>> in `ivydependencies.json`.
+The JSON will be used to populate the `IvyDeps` of the `ScalaModule`.
+You can set these dependencies directly, but unless they are fetched and stored in the workspace by Wit, these Wake rules will not be able to find them.
+
+Source dependencies are specified as a `List` of ``ScalaModule``s in the `Deps` field of the `ScalaModule`.
+For example, we can add modify our earlier example to have a dependency on `someScalaModule`:
+
+----
+global def exampleScalaModule =
+  makeScalaModuleFromJSON here "example"
+  | setScalaModuleDeps (someScalaModule, Nil)
+----
+
+==== Compilation
+
+You can compile a `ScalaModule` using the function `compileScalaModule`.
+It will recursively compile `ScalaModule` dependencies.
+
+==== Running
+
+You can get the full classpath needed to run a `ScalaModule` with the function `scalaModuleClasspath`.
+Note that `scalaModuleClasspath` will compile the passed module and its dependencies.
+
+Once you have the classpath, running a compiled `ScalaModule` is fairly typical Wake code.
+For example, assume `exampleScalaModule` has a main function `example.Main` and accepts one command-line argument:
+
+----
+def runExample arg =
+  def classpath = scalaModuleClasspath exampleScalaModule | map getPathName | catWith ":"
+  def cmd = which "java", "-cp", classpath, "example.Main", arg.getPathName, Nil
+  def visible = arg, Nil
+  makePlan cmd visible | runJob
+----
+
+You can learn more about Wake and job invocations in the https://github.com/sifive/wake/blob/v0.15.1/share/doc/wake/tutorial.md[Wake tutorial].
+
+
+[#scalamodule]
+=== ScalaModule
+
+`ScalaModule` is a Wake Tuple which comes with generated accessor functions.
+These accessor functions are the primary mechanism for creating `ScalaModules`.
+Please see the https://github.com/sifive/wake/blob/a0d99f15cf806f917d64714934d337b392d36f26/share/doc/wake/tour/tuples.adoc[tuple documentation]
+for more information.
+
+----
+tuple ScalaModule =
+  global Name:               String
+  global RootDir:            String
+  global ScalaVersion:       ScalaVersion
+  global IvyDeps:            List UnexpandedIvyDep
+  global Deps:               List ScalaModule
+  # These are relative to RootDir
+  global SourceDirs:         List String
+  global ResourceDirs:       List String
+  # These operations could be expensive
+  global FnGeneratedSources: Unit => List Path
+  global ScalacOptions:      List String
+  global CompilerPlugins:    List UnexpandedIvyDep
+  # We propogate errors
+  global Error:              Option Error
+----
