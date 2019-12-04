@@ -9,6 +9,8 @@ def bloopInstall = "scala"
 def ivyCache = "ivycache"
 # Python wrapper script for invoking bloop
 def bloopWake = source "{here}/bloop_wake"
+# Where we expect to find wit/scalaplugin.py
+def scalaPluginPath = "wit/lib"
 
 global def readIvyDepsJSON dir =
   source "{dir}/ivydependencies.json" | parseJSONFile
@@ -251,7 +253,9 @@ target memoizeGenSrcs name \ module =
 global def getScalaModuleGeneratedSources module =
   memoizeGenSrcs module.getScalaModuleName module
 
-# WHy is this global? Make Expanded instead of Resolved
+# Given a directory, return all Java and Scala source files
+def ourSources dir = sources dir `.*\.(scala|java)`
+
 def getScalaModuleExpandedSourceDirs module =
   def mroot = module.getScalaModuleRootDir
   map (simplify "{mroot}/{_}") module.getScalaModuleSourceDirs
@@ -259,6 +263,19 @@ def getScalaModuleExpandedSourceDirs module =
 def getScalaModuleExpandedResourceDirs module =
   def mroot = module.getScalaModuleRootDir
   map (simplify "{mroot}/{_}") module.getScalaModuleResourceDirs
+
+# Source files found in the source directories
+def getScalaModuleSourceFiles module =
+  # TODO should this be memoized?
+  module.getScalaModuleExpandedSourceDirs | mapFlat ourSources
+
+# Source files including generated sources
+def getScalaModuleAllSourceFiles module =
+  module.getScalaModuleSourceFiles ++ module.getScalaModuleGeneratedSources
+
+# All files found in the resource directories
+def getScalaModuleResourceFiles module =
+  module.getScalaModuleExpandedResourceDirs | mapFlat (sources _ `.*`)
 
 global def getScalaModuleTransDeps module =
   def err Unit =
@@ -331,21 +348,21 @@ def bloopScalaModuleJSON module =
   def bloopVersion = "1.2.5"
   def depClasspath = transDeps | map moduleClassesDir
   def genSrcs = module.getScalaModuleGeneratedSources
-  def sources = module.getScalaModuleExpandedSourceDirs ++ (map getPathName genSrcs)
-  def resources = module.getScalaModuleExpandedResourceDirs
+  def sourceFiles = module.getScalaModuleAllSourceFiles | map getPathName
+  def resourceFiles  = module.getScalaModuleResourceFiles | map getPathName
   JObject (
     "version" → JString bloopVersion,
     "project" → JObject (
       "name" → JString name,
       "directory" → JString dir.inws,
-      "sources" → sources | map inws | map JString | JArray,
+      "sources" → sourceFiles | map inws | map JString | JArray,
       # Until bloop incremental compilation works when invoked as CLI, lie about dependencies
       #"dependencies" → map getScalaModuleName modDeps | map JString | JArray,
       "dependencies" → JArray Nil,
       "classpath" → ivyClasspath ++ depClasspath | map inws | map JString | JArray,
       "out" → module.bloopOutDir.inws | JString,
       "classesDir" → module.moduleClassesDir.inws | JString,
-      "resources" → resources | map inws | map JString | JArray,
+      "resources" → resourceFiles | map inws | map JString | JArray,
       "scala" → scalaJSON,
       Nil
     ),
@@ -377,15 +394,10 @@ target memoizeBloopCompile name \ module =
   def jarDir = mkdir "{module.buildDir}/jar"
   def jarName = "{jarDir.getPathName}/{name}.jar"
   def inputs =
-    def sourceFiles =
-      def dirs = module.getScalaModuleExpandedSourceDirs
-      def auto = map (sources _ `.*\.(scala|java)`) dirs | flatten
-      def resources = map (sources _ `.*`) module.getScalaModuleExpandedResourceDirs | flatten
-      def unmanaged = module.getScalaModuleGeneratedSources
-      unmanaged ++ resources ++ auto
+    def sourceFiles = module.getScalaModuleAllSourceFiles ++ module.getScalaModuleResourceFiles
     def depJars = map compileScalaModule transDeps
     def configs = map bloopConfig transDeps
-    bin, bloopWake, configTemplate, configs ++ depJars ++ sourceFiles
+    bin, configTemplate, configs ++ depJars ++ sourceFiles
   def bloopArgs =
     def args = "compile", "-c", bloopDir.getPathName, module.getScalaModuleName, Nil
     args | catWith " "
@@ -394,7 +406,7 @@ target memoizeBloopCompile name \ module =
     , "--coursier-cache", ivyCache, "--bloop-args", bloopArgs, "--jar", jarName, Nil
   def plan =
     makePlan cmd inputs
-    | editPlanEnvironment ("JAVA_OPTS=-Xss8M", _)
+    | editPlanEnvironment ("JAVA_OPTS=-Xss8M", "PYTHONPATH={scalaPluginPath}", _)
     | setPlanFnInputs (\_ inputs | map getPathName)
     | setPlanLocalOnly True
     | setPlanFnOutputs (\_ configFilename, jarName, Nil)
