@@ -1,9 +1,9 @@
 {
-  "bloop": {
-    "scalaVersion": "2.12.8",
+  "mill": {
+    "scalaVersion": "2.12.6",
     "dependencies": [
-        "ch.epfl.scala::bloop-frontend:1.2.5",
-        "ch.epfl.scala::bsp4s:2.0.0-M3"
-      ]
+      "org.scala-sbt::compiler-bridge:1.2.5",
+      "com.lihaoyi::mill-scalalib-worker:0.6.0"
+    ]
   }
 }
