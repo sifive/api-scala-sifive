@@ -349,7 +349,7 @@ def bloopScalaModuleJSON module =
   def depClasspath = transDeps | map moduleClassesDir
   def genSrcs = module.getScalaModuleGeneratedSources
   def sourceFiles = module.getScalaModuleAllSourceFiles | map getPathName
-  def resourceFiles  = module.getScalaModuleResourceFiles | map getPathName
+  def resourceDirs = module.getScalaModuleExpandedResourceDirs
   JObject (
     "version" → JString bloopVersion,
     "project" → JObject (
@@ -362,7 +362,7 @@ def bloopScalaModuleJSON module =
       "classpath" → ivyClasspath ++ depClasspath | map inws | map JString | JArray,
       "out" → module.bloopOutDir.inws | JString,
       "classesDir" → module.moduleClassesDir.inws | JString,
-      "resources" → resourceFiles | map inws | map JString | JArray,
+      "resources" → resourceDirs | map inws | map JString | JArray,
       "scala" → scalaJSON,
       Nil
     ),
@@ -398,6 +398,12 @@ target memoizeBloopCompile name \ module =
     def depJars = map compileScalaModule transDeps
     def configs = map bloopConfig transDeps
     bin, configTemplate, configs ++ depJars ++ sourceFiles
+    | sortBy (_.getPathName <* _.getPathName) # Sorted to ensure hash is stable
+  # This is a hack to ensure that changes to visible files rerun the job
+  # We give directories as inputs to Bloop which then looks in those directories so new files m
+  def visibleHashHack =
+    def hash = (\x prim "hash") inputs
+    "VISIBLE_FILES_HASH_HACK={format hash}"
   def bloopArgs =
     def args = "compile", "-c", bloopDir.getPathName, module.getScalaModuleName, Nil
     args | catWith " "
@@ -406,7 +412,7 @@ target memoizeBloopCompile name \ module =
     , "--coursier-cache", ivyCache, "--bloop-args", bloopArgs, "--jar", jarName, Nil
   def plan =
     makePlan cmd inputs
-    | editPlanEnvironment ("JAVA_OPTS=-Xss8M", "PYTHONPATH={scalaPluginPath}", _)
+    | editPlanEnvironment ("JAVA_OPTS=-Xss8M", "PYTHONPATH={scalaPluginPath}", visibleHashHack, _)
     | setPlanFnInputs (\_ inputs | map getPathName)
     | setPlanLocalOnly True
     | setPlanFnOutputs (\_ configFilename, jarName, Nil)
