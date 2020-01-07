@@ -1,0 +1,3 @@
+# Ignore all .wake files in this directory since we don't want them to get
+# picked up in any non-test environment.
+*.wake

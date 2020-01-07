@@ -1,0 +1,34 @@
+name: Test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # $WIT_WORKSPACE path is relative to $GITHUB_WORKSPACE
+      WIT_WORKSPACE: wit-workspace
+
+    steps:
+
+    - uses: actions/checkout@v2
+      with:
+        path: wit-packages/api-scala-sifive
+
+    - name: 'Wit Init'
+      uses: sifive/wit/actions/wit@v0.12.0
+      with:
+        command: init
+        arguments: |
+          ${{ env.WIT_WORKSPACE }}
+          -a ./wit-packages/api-scala-sifive
+          -a git@github.com:sifive/environment-blockci-sifive.git::0.3.0
+        force_github_https: true
+
+    - name: Run tests
+      run: |
+        set -euo pipefail
+        docker run \
+          --volume="$GITHUB_WORKSPACE/$WIT_WORKSPACE:/mnt/workspace" \
+          --workdir="/mnt/workspace" \
+          --rm \
+          sifive/environment-blockci:0.3.0 \
+          api-scala-sifive/tests/run-tests.sh

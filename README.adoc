@@ -2,6 +2,8 @@
 :toc:
 :toc-placement!:
 
+image::https://github.com/sifive/api-scala-sifive/workflows/Test/badge.svg[]
+
 https://github.com/sifive/wake[Wake] build rules for building https://www.scala-lang.org/[Scala] projects.
 Integrated with https://github.com/sifive/wit[Wit] for dependency fetching and resolution.
 
