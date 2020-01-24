@@ -1,6 +1,6 @@
 global def exampleScalaModule = makeScalaModuleFromJSON here "example"
 
-global def runTests =
+global def runAPIScalaSiFiveTests Unit =
   def paths = scalaModuleClasspath exampleScalaModule
   def classpath = paths | map getPathName | catWith ":"
   def cmd = which "java", "-cp", classpath, "example.Main", Nil

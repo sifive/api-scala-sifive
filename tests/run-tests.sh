@@ -17,4 +17,4 @@ ln -snf "test.wake.template" "$api_scala_sifive_path/tests/test.wake"
 # dependencies for testing-only packages.
 ./scala/coursier fetch --cache ./ivycache --scala-version 2.12.8 org.json4s::json4s-native:3.6.7
 
-wake runTests
+wake runAPIScalaSiFiveTests Unit
