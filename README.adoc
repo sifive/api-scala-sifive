@@ -185,3 +185,21 @@ tuple ScalaModule =
   # We propogate errors
   global Error:              Option Error
 ----
+
+== Developer Documentation
+
+=== Running tests locally
+
+You must first have `wit` (v0.12.0), `wake` (v0.17.1), and `jq` (v1.5) installed.
+Note that only committed changes will be tested.
+
+----
+wit init test-ws -a $PWD -a git@github.com:sifive/environment-blockci-sifive.git::0.3.0
+cd test-ws
+
+# `-a $PWD` above will clone api-scala-sifive with whatever directory name you cloned it to
+# The tests require it to be named "api-scala-sifive", so if it has a different name, rename it
+mv <name of api-scala-sifive> api-scala-sifive
+
+./api-scala-sifive/tests/run-tests.sh
+----
