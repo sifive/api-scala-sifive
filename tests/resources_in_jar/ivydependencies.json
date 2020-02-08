@@ -1,0 +1,5 @@
+{
+  "resources_in_jar": {
+    "scalaVersion": "2.12.8"
+  }
+}

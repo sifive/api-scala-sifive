@@ -1,0 +1,15 @@
+global def resourceInJarScalaModule = makeScalaModuleFromJSON here "resources_in_jar"
+
+def test Unit =
+  def paths = scalaModuleClasspath resourceInJarScalaModule
+  def classpath = paths | map getPathName | catWith ":"
+  def cmd = which "java", "-cp", classpath, "test.Main", Nil
+  def visible = paths
+  def job = makePlan cmd visible | runJob
+  match job.getJobStatus
+    Exited 0 = Pass "Passed"
+    Exited i = Fail "Exited with status {i.format}".makeError
+    Signaled i = Fail "Signaled with status {i.format}".makeError
+    Aborted e = Fail e
+
+publish apiScalaSiFiveTests = test, Nil
