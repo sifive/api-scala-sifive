@@ -3,5 +3,10 @@
         "commit": "298410a0f027c73f1c81161748794ef753225f65",
         "name": "wit",
         "source": "git@github.com:sifive/wit.git"
+    },
+    {
+        "commit": "dfe627942787af4a52f82cd0e99d5c640f5b0d72",
+        "name": "api-buildtarget-sifive",
+        "source": "git@github.com:sifive/api-buildtarget-sifive.git"
     }
 ]
