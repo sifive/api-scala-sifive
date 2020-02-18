@@ -196,7 +196,7 @@ tuple ScalaModule =
   global FnGeneratedSources: Unit => List Path
   global ScalacOptions:      List String
   global CompilerPlugins:    List UnexpandedIvyDep
-  # We propogate errors
+  # We propagate errors
   global Error:              Option Error
 
 def addSBTDefaults module =
