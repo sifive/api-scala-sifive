@@ -376,6 +376,83 @@ target memoizeBloopTemplate name \ module =
 def bloopTemplate module =
   memoizeBloopTemplate module.getScalaModuleName module
 
+tuple ExportBloopConfigPlan =
+  ScalaModule: ScalaModule
+  ConfigDir: String
+  BuildDir: String
+
+# makes a ExportBloopConfigPlan
+# ConfigDir defaults to ${workspace_root}/.bloop
+# BuildDirDir defaults to ${workspace_root}/build/bloop
+global def makeExportBloopConfigPlan scalaModule =
+  ExportBloopConfigPlan scalaModule "{workspace}/.bloop" "{workspace}/build/bloop"
+
+global def exportBloopConfig scalaModule =
+  def plan = makeExportBloopConfigPlan scalaModule
+  exportBloopConfigPlan plan
+
+target exportBloopConfigPlan plan =
+  def module = plan.getExportBloopConfigPlanScalaModule
+  def configDir = plan.getExportBloopConfigPlanConfigDir
+  def headConfig =
+    bloopScalaModuleConfigJSON plan
+    | prettyJSON
+    | write "{configDir}/{module.getScalaModuleName}.json"
+  module
+  | getScalaModuleDeps
+  | findFailFn (
+    plan
+    | setExportBloopConfigPlanScalaModule _
+    | exportBloopConfigPlan
+  )
+  | rmapPass (
+    _
+    | flatten
+    | (headConfig, _)
+    | findFailFn getPathResult
+  )
+
+def bloopScalaModuleConfigJSON (ExportBloopConfigPlan module configDir buildDir) =
+  def bloopOutDir module = "{buildDir}/{module.getScalaModuleName}"
+  def moduleClassesDir module = "{buildDir}/{module.getScalaModuleName}/classes"
+
+  def name = module.getScalaModuleName
+  def dir = module.getScalaModuleRootDir
+  def ver = module.getScalaModuleScalaVersion
+  def transDeps = module.getScalaModuleTransDeps
+  def ivyClasspath =
+    def ivyDeps = module.getScalaModuleTransIvyDeps
+    def deps = map (expandIvyDep ver) ivyDeps
+    def scalaCompiler = module.getScalaModuleScalaVersion.scalaCompilerIvyDep
+    resolveIvyDeps (scalaCompiler, deps) | map getPathName
+  def inws path = simplify "{workspace}/{path}"
+  def scalaJSON =
+    def scalacOpts =
+      def getPluginOpt dep = expandIvyDep ver dep | getIvyDepJar | getPathName | inws | ("-Xplugin:{_}")
+      module.getScalaModuleScalacOptions ++ (map getPluginOpt module.getScalaModuleCompilerPlugins)
+    bloopScalaLibJSONImp inws ver scalacOpts
+  def bloopVersion = "1.2.5"
+  def depClasspath = transDeps | map moduleClassesDir
+  def genSrcs = module.getScalaModuleGeneratedSources
+  def sources = module.getScalaModuleExpandedSourceDirs ++ (map getPathName genSrcs)
+  def resources = module.getScalaModuleExpandedResourceDirs
+  JObject (
+    "version" → JString bloopVersion,
+    "project" → JObject (
+      "name" → JString name,
+      "directory" → JString (inws dir),
+      "sources" → sources | map inws | map JString | JArray,
+      "dependencies" → JArray (map (JString _.getScalaModuleName) module.getScalaModuleDeps),
+      "classpath" → ivyClasspath ++ depClasspath | map inws | map JString | JArray,
+      "out" → module.bloopOutDir.inws | JString,
+      "classesDir" → module.moduleClassesDir.inws | JString,
+      "resources" → resources | map inws | map JString | JArray,
+      "scala" → scalaJSON,
+      Nil
+    ),
+    Nil
+  )
+
 def bloopTemplateName module =
   def name = module.getScalaModuleName
   "{bloopDir.getPathName}/{name}.json.template"
