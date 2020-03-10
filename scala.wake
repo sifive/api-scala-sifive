@@ -302,6 +302,9 @@ def inws path = "$WORKSPACE/{path}"
 
 # TODO implement scalacOptions
 def bloopScalaLibJSON scalaVersion scalacOptions =
+  bloopScalaLibJSONImp inws scalaVersion scalacOptions
+
+def bloopScalaLibJSONImp inws scalaVersion scalacOptions =
   def ivyDep = scalaCompilerIvyDep scalaVersion
   def ivyJars = resolveIvyDeps (ivyDep, Nil)
   def jars = ivyJars | map getPathName | map inws | map JString | JArray
