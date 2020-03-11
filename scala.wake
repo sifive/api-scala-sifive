@@ -12,13 +12,20 @@ def bloopWake = source "{here}/bloop_wake"
 # Where we expect to find wit/scalaplugin.py
 def scalaPluginPath = "wit/lib"
 
+def myMakeStatePath x =
+  makePlan ("<makeStatePath>", x, Nil) Nil
+  | setPlanKeep      False
+  | setPlanFnOutputs (\_ x, Nil)
+  | runJobWith       virtualRunner
+  | getJobOutput
+
 global def readIvyDepsJSON dir =
   source "{dir}/ivydependencies.json" | parseJSONFile
 
 # Should be installed by wit
 def coursierBin =
   match (files bloopInstall `.*coursier.*`)
-    bin, Nil = makeStatePath bin
+    bin, Nil = myMakeStatePath bin
     Nil      = makeBadPath (makeError "Coursier not found! Did you run `wit fetch-scala`?")
     l        = makeBadPath (makeError "Multiple coursier executables found! {catWith ", " l}")
 
