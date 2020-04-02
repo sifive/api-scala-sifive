@@ -1,0 +1,12 @@
+
+def test Unit =
+  def deps = ("foo", "bar", Nil) | map (source "{here}/{_}/ivydependencies.json")
+  def fetched = fetchScala "{here}/build" deps
+  def checkFor = assertHasFile fetched
+  Pass here.testNameFromDir
+  | checkFor "json4s-native_2.12-3.6.1.jar" "We should find json4s 2.12"
+  | checkFor "json4s-native_2.11-3.6.1.jar" "We should find json4s 2.11"
+  | checkFor "scala-compiler-2.12.8.jar" "We should find Scala 2.12.8"
+  | checkFor "scala-compiler-2.11.12.jar" "We should find Scala 2.11.12"
+
+publish apiScalaSiFiveTests = test, Nil

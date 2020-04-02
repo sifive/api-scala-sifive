@@ -3,14 +3,23 @@
 def buildRoot = mkdir "build"
 def root = mkdir "{buildRoot.getPathName}/{here}"
 def bloopDir = mkdir "{root.getPathName}/bloop"
-# Where I expect Scala to be installed by wit
 def bloopInstall = "scala"
 # Where I expect Scala Ivy dependencies to be downloaded
 def ivyCache = "ivycache"
 # Python wrapper script for invoking bloop
 def bloopWake = source "{here}/bloop_wake"
-# Where we expect to find wit/scalaplugin.py
-def scalaPluginPath = "wit/lib"
+
+global def readIvyDepsJSON dir =
+  source "{dir}/ivydependencies.json" | parseJSONFile
+
+def fetchCoursier Unit =
+  def bin = source "{here}/fetch_coursier"
+  def dir = mkdir bloopInstall
+  def deps = sources here `.*\.py`
+  makePlan (bin.getPathName, dir.getPathName, Nil) (bin, dir, deps)
+  | editPlanEnvironment ("PYTHONDONTWRITEBYTECODE=1", _)
+  | runJob
+  | getJobOutput
 
 def myMakeStatePath x =
   makePlan ("<makeStatePath>", x, Nil) Nil
@@ -19,24 +28,57 @@ def myMakeStatePath x =
   | runJobWith       virtualRunner
   | getJobOutput
 
-global def readIvyDepsJSON dir =
-  source "{dir}/ivydependencies.json" | parseJSONFile
-
-# Should be installed by wit
+# Maintain compatibility with Wit 0.12 and below
+# Wit versions <= 0.12 have a Scala plugin that fetches Coursier, Bloop, and
+# all dependencies specified in ivydependencies.json files at the root of wit
+# packages (where the wit-manifest.json) resides.
+# To maintain backwards compatibility, accept that these dependencies may have
+# already been fetched, use virtual jobs to own the files if they already exist
+# rather than fetching them ourselves.
 def coursierBin =
   match (files bloopInstall `.*coursier.*`)
     bin, Nil = myMakeStatePath bin
-    Nil      = makeBadPath (makeError "Coursier not found! Did you run `wit fetch-scala`?")
+    Nil      = fetchCoursier Unit
     l        = makeBadPath (makeError "Multiple coursier executables found! {catWith ", " l}")
 
-# Virtual job that owns all fetched ivy dependencies
-def ivyCacheDeps Unit =
+# Only get ivydependencies.json files 1 level under workspace root
+# This emulates Wit <= 0.12 behavior where packages are placed directly below
+# the workspace root and Wit fetches dependencies in ivydependencies.json
+# located at the root of packages.
+def ivyDepsFiles = sources "." `[^/]*/ivydependencies\.json`
+
+# Virtual job that owns all wit-fetched ivy deps
+target existingIvyCacheDeps Unit =
   def fs = files ivyCache `.*`
   makePlan ("<ivycache>", ivyCache, Nil) Nil
   | setPlanKeep      False
   | setPlanFnOutputs (\_ fs)
   | runJobWith       virtualRunner
   | getJobOutputs
+
+# Job that fetches ivy dependencies
+target ivyCacheDeps Unit =
+  def existing = existingIvyCacheDeps Unit
+  def bin = source "{here}/fetch_ivy_dependencies"
+  def dir = mkdir bloopInstall
+  def cache = mkdir ivyCache
+  def otherDeps = source "{here}/lib/scala-bridge-fetcher_2.12-0.1.0.jar", sources here `.*\.py`
+  def cmd = bin.getPathName, "--scala-dir", dir.getPathName, "--cache-dir", cache.getPathName, map getPathName ivyDepsFiles
+  def allDeps = bin, dir, cache, coursierBin, otherDeps ++ ivyDepsFiles ++ existing
+  # Filter for files residing in ivycache dir, composes with prior FnOutputs
+  def filterIvycacheFiles origFn files =
+     files | origFn | filter (matches `ivycache/.*`)
+  def newIvyCacheDeps = match ivyDepsFiles
+    Nil = Nil
+    _   =
+      makePlan cmd allDeps
+      | editPlanEnvironment ("PYTHONDONTWRITEBYTECODE=1", _)
+      # We need to ensure that we only recognize outputs in ivycache, some bloop artifacts are non-deterministic
+      | editPlanFnOutputs filterIvycacheFiles
+      | runJob
+      | getJobOutputs
+  newIvyCacheDeps ++ existing
+
 
 # Memoized tree for converting from Strings to Paths to jars in Coursier cache
 target ivyCacheJars Unit =
@@ -66,7 +108,7 @@ def getIvyDepJars filenames =
 # Returns a Path
 global def getIvyDepJar dep =
   def err Unit =
-    makeBadPath (makeError "{dep.ivyDepToString} not found in downloaded ivy dependencies! Did you run `wit fetch-scala`?")
+    makeBadPath (makeError "{dep.ivyDepToString} not found in downloaded ivy dependencies!")
   def ivyDeps = getIvyDepJars (dep.ivyDepToCoursierCache, Nil)
   match ivyDeps
     value, Nil = value
@@ -415,11 +457,11 @@ target memoizeBloopCompile name \ module =
     def args = "compile", "-c", bloopDir.getPathName, module.getScalaModuleName, Nil
     args | catWith " "
   def cmd =
-    bin.getPathName, "-t", configTemplate.getPathName, "-c", configFilename , "-b", bloopInstall
+    "python3", bin.getPathName, "-t", configTemplate.getPathName, "-c", configFilename , "-b", bloopInstall
     , "--coursier-cache", ivyCache, "--bloop-args", bloopArgs, "--jar", jarName, Nil
   def plan =
     makePlan cmd inputs
-    | editPlanEnvironment ("JAVA_OPTS=-Xss8M", "PYTHONPATH={scalaPluginPath}", visibleHashHack, _)
+    | editPlanEnvironment ("JAVA_OPTS=-Xss8M", visibleHashHack, _)
     | setPlanFnInputs (\_ inputs | map getPathName)
     | setPlanLocalOnly True
     | setPlanFnOutputs (\_ configFilename, jarName, Nil)

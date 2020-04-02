@@ -1,0 +1,9 @@
+
+def test Unit =
+  def deps = source "{here}/foo/ivydependencies.json", Nil
+  def fetched = fetchScala "{here}/build" deps
+  def checkFor = assertHasFile fetched
+  Pass here.testNameFromDir
+  | checkFor "paradise_2.12.8-2.1.0.jar" "We should find minor version dependency"
+
+publish apiScalaSiFiveTests = test, Nil

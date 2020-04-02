@@ -1,0 +1,8 @@
+{
+    "foo": {
+      "scalaVersion": "2.12.8",
+      "dependencies": [
+          "org.scalamacros:::paradise:2.1.0"
+      ]
+    }
+}

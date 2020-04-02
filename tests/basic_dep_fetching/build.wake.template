@@ -1,0 +1,16 @@
+
+# We put our ivydependencies.json file in subdir/ so it isn't seen by run-tests.sh
+def test Unit =
+  def deps = source "{here}/subdir/ivydependencies.json", Nil
+  def fetched = fetchScala "{here}/build" deps
+  def checkFor = assertHasFile fetched
+  def checkNot = assertNotHasFile fetched
+  def checkForRegex = assertHasRegex fetched
+  Pass here.testNameFromDir
+  | checkFor "scala/coursier" "We should find coursier"
+  | checkFor "json4s-native_2.12-3.6.1.jar" "We should find json4s"
+  | checkFor "scala-compiler-2.12.8.jar" "We should find the right Scala"
+  | checkNot "scala-library-2.12.6.jar" "We should NOT find the wrong Scala"
+  | checkForRegex `.*scala-compiler-bridge.*\.jar` "We should find the compiler bridge"
+
+publish apiScalaSiFiveTests = test, Nil

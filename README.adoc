@@ -1,18 +1,15 @@
-= Wake Scala API
+= API Scala SiFive
 :toc:
 :toc-placement!:
 
 image::https://github.com/sifive/api-scala-sifive/workflows/Test/badge.svg[]
 
 https://github.com/sifive/wake[Wake] build rules for building https://www.scala-lang.org/[Scala] projects.
-Integrated with https://github.com/sifive/wit[Wit] for dependency fetching and resolution.
 
 toc::[]
 
 [#dep-resolution]
 == Dependency Fetching and Resolution
-
-Wit has a plugin for fetching Scala as well as standard Maven dependencies.
 
 [#ivy-deps-json]
 === ivydependencies.json
@@ -62,7 +59,7 @@ For example, `"my.org:::cool-project:1.0.0"` would expand to `"my.org:cool-proje
 [#coursier]
 === Coursier
 
-The Wit Scala Plugin uses https://get-coursier.io/[Coursier] to resolve and fetch dependencies.
+API Scala SiFive uses https://get-coursier.io/[Coursier] to resolve and fetch dependencies.
 Of particular interest are Couriser environment variables that allow the user to control fetching and resolution.
 For example, by default, coursier only fetches from the local cache and maven central,
 but to enable additional repositories, one can set the `COURSIER_REPOSITORIES` environment variable.
@@ -72,7 +69,7 @@ Please see linked Coursier documentation above for more information.
 == Wake API
 
 The Wake API is a set of Wake data structures and functions that allow Wake to build Scala projects.
-Similarly to the Wit Scala Plugin, the Wake build rules use <<coursier, Coursier>> to resolve dependencies;
+Similarly to how dependencies are fetched, the build rules use <<coursier, Coursier>> to resolve dependencies;
 however, to enable offline use, the Wake rules disable _fetching_, delegating that responsibility to Wit.
 
 The primary data structure of Scala builds in Wake are `ScalaModules`
@@ -190,16 +187,15 @@ tuple ScalaModule =
 
 === Running tests locally
 
-You must first have `wit` (v0.12.0), `wake` (v0.17.1), and `jq` (v1.5) installed.
-Note that only committed changes will be tested.
+You must first have `wake` (v0.17.1).
 
 ----
-wit init test-ws -a $PWD -a git@github.com:sifive/environment-blockci-sifive.git::0.3.0
-cd test-ws
-
-# `-a $PWD` above will clone api-scala-sifive with whatever directory name you cloned it to
-# The tests require it to be named "api-scala-sifive", so if it has a different name, rename it
-mv <name of api-scala-sifive> api-scala-sifive
-
-./api-scala-sifive/tests/run-tests.sh
+# from the root of the repository
+./tests/run-tests.sh
 ----
+
+Note that run-tests.sh emulates the `preinstall` behavior which is based on Wit
+<= v0.12.0 Scala plugin fetching behavior.
+It will fetch all ivydependencies.json files that are one directory below tests/.
+Putting an ivydependencies.json file in a directory deeper than that prevents
+it from being fetched by `run-tests.sh`.

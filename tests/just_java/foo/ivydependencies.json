@@ -1,0 +1,7 @@
+{
+    "foo": {
+      "dependencies": [
+          "org.antlr:antlr4:4.7.2"
+      ]
+    }
+}

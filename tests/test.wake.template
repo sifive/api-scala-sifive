@@ -3,3 +3,68 @@ global def runAPIScalaSiFiveTests Unit =
   subscribe apiScalaSiFiveTests
   | map (_ Unit)
   | findFail
+
+
+# Utility functions for testing
+
+def repoRoot = simplify "{here}/.."
+def pythonUtils = sources "{repoRoot}" `.*\.py`
+def bridgeFetcher = source "{repoRoot}/lib/scala-bridge-fetcher_2.12-0.1.0.jar"
+
+global def testNameFromDir dir =
+  extract `tests/(.*)` dir
+  | head
+  | getOrElse "<test {dir} not found in api-scala-sifive/tests/!>"
+
+# Asserts that `fileRegex` is (or isn't, see `has`) contained in `paths`
+#   Prepends `.*` to `fileRegex`
+#   Will propagate `previousResult` if `previousResult` is a Fail or result of check is Pass
+#     otherwise, returns Fail with `msg`
+# (has: Boolean) => (paths: List Path) => (fileRegex: RegExp) => (msg: String) => (previousResult: Result a Error) => Result a Error
+global def assertFile has paths fileRegex msg previousResult =
+  def pathsFail = paths | map getPathResult | findFail
+  def regExp = regExpCat (`.*`, fileRegex, Nil)
+  def found = find (matches regExp _.getPathName) paths
+  def shouldHave = match _
+    Some _ = Pass Unit
+    None   = Fail msg.makeError
+  def shouldNotHave = match _
+    Some _ = Fail msg.makeError
+    None   = Pass Unit
+  def intoResult = if has then shouldHave else shouldNotHave
+  pathsFail
+  | rmapPass (\_ found.intoResult)
+  | rmapPass (\_ previousResult)
+
+global def assertHasFile paths fileName      = assertHasRegex paths fileName.quote
+global def assertNotHasFile  paths fileName  = assertNotHasRegex paths fileName.quote
+global def assertHasRegex    paths = assertFile True paths
+global def assertNotHasRegex paths = assertFile False paths
+
+
+# TODO Move this into main code as package private function
+global def fetchCoursier dest =
+  def bin = source "{repoRoot}/fetch_coursier"
+  makePlan (bin.getPathName, dest.getPathName, Nil) (bin, dest, pythonUtils)
+  | editPlanEnvironment ("PYTHONDONTWRITEBYTECODE=1", _)
+  | setPlanStderr logVerbose # Suppress default printing
+  | runJob
+  | getJobOutput
+
+# Run standard Scala fetching into dir
+global def fetchScala buildDir ivyDepsFiles =
+  def dir = mkdir buildDir
+  def scalaDir = mkdir "{dir.getPathName}/scala"
+  def cacheDir = mkdir "{dir.getPathName}/ivycache"
+  def coursier = fetchCoursier scalaDir
+  def bin = source "{repoRoot}/fetch_ivy_dependencies"
+  def ivyNames = ivyDepsFiles | map (_.getPathName)
+  def cmd = bin.getPathName, "--scala-dir", scalaDir.getPathName, "--cache-dir", cacheDir.getPathName, ivyNames
+  def fetched =
+    makePlan cmd (bin, coursier, scalaDir, cacheDir, bridgeFetcher, pythonUtils ++ ivyDepsFiles)
+    | editPlanEnvironment ("PYTHONDONTWRITEBYTECODE=1", _)
+    | setPlanStderr logVerbose # Suppress intentional failure printing to stderr
+    | runJob
+    | getJobOutputs
+  coursier, fetched
+

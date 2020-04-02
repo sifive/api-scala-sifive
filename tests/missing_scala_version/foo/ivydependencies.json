@@ -1,0 +1,7 @@
+{
+    "foo": {
+      "dependencies": [
+          "org.scalamacros:::paradise:2.1.0"
+      ]
+    }
+}

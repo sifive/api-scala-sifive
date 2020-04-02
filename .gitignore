@@ -1,3 +1,10 @@
 bin/
 .mill
 .coursier
+build/
+ivycache/
+scala/
+__pycache__/
+*.swp
+*.fuse*
+wake.db

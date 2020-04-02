@@ -1,0 +1,11 @@
+
+def test Unit =
+  def deps = source "{here}/foo/ivydependencies.json", Nil
+  fetchScala "{here}/build" deps
+  | map getPathResult
+  | findFail
+  | getFail
+  | omap (\_ Pass here.testNameFromDir)
+  | getOrElse (Fail "Expected Scala fetching to fail!".makeError)
+
+publish apiScalaSiFiveTests = test, Nil

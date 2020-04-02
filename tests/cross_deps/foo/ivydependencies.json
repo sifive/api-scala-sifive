@@ -1,0 +1,9 @@
+{
+    "foo": {
+      "scalaVersion": "2.12.8",
+      "crossScalaVersions": ["2.11.12"],
+      "dependencies": [
+          "org.json4s::json4s-native:3.6.1"
+      ]
+    }
+}
