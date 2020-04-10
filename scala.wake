@@ -24,6 +24,7 @@ def fetchCoursier Unit =
 def myMakeStatePath x =
   makePlan ("<makeStatePath>", x, Nil) Nil
   | setPlanKeep      False
+  | setPlanEcho      Verbose
   | setPlanFnOutputs (\_ x, Nil)
   | runJobWith       virtualRunner
   | getJobOutput
@@ -41,49 +42,39 @@ def coursierBin =
     Nil      = fetchCoursier Unit
     l        = makeBadPath (makeError "Multiple coursier executables found! {catWith ", " l}")
 
-# Only get ivydependencies.json files 1 level under workspace root
+# Only get ivydependencies.json files 0 or 1 levels under workspace root
 # This emulates Wit <= 0.12 behavior where packages are placed directly below
 # the workspace root and Wit fetches dependencies in ivydependencies.json
 # located at the root of packages.
-def ivyDepsFiles = sources "." `[^/]*/ivydependencies\.json`
-
-# Virtual job that owns all wit-fetched ivy deps
-target existingIvyCacheDeps Unit =
-  def fs = files ivyCache `.*`
-  makePlan ("<ivycache>", ivyCache, Nil) Nil
-  | setPlanKeep      False
-  | setPlanFnOutputs (\_ fs)
-  | runJobWith       virtualRunner
-  | getJobOutputs
+def ivyDepsFiles = sources "." `[^/]*/?ivydependencies\.json`
 
 # Job that fetches ivy dependencies
-target ivyCacheDeps Unit =
-  def existing = existingIvyCacheDeps Unit
+def ivyCacheDeps =
   def bin = source "{here}/fetch_ivy_dependencies"
   def dir = mkdir bloopInstall
   def cache = mkdir ivyCache
   def otherDeps = source "{here}/lib/scala-bridge-fetcher_2.12-0.1.0.jar", sources here `.*\.py`
-  def cmd = bin.getPathName, "--scala-dir", dir.getPathName, "--cache-dir", cache.getPathName, map getPathName ivyDepsFiles
-  def allDeps = bin, dir, cache, coursierBin, otherDeps ++ ivyDepsFiles ++ existing
-  # Filter for files residing in ivycache dir, composes with prior FnOutputs
-  def filterIvycacheFiles origFn files =
-     files | origFn | filter (matches `ivycache/.*`)
-  def newIvyCacheDeps = match ivyDepsFiles
+  def cmd =
+    "python3", bin.getPathName, "--scala-dir", dir.getPathName, "--cache-dir",
+    cache.getPathName, map getPathName ivyDepsFiles
+  def allDeps = bin, dir, cache, coursierBin, otherDeps ++ ivyDepsFiles
+  def listIvycache Unit = files ivyCache `.*`
+  match ivyDepsFiles
     Nil = Nil
     _   =
       makePlan cmd allDeps
       | editPlanEnvironment ("PYTHONDONTWRITEBYTECODE=1", _)
-      # We need to ensure that we only recognize outputs in ivycache, some bloop artifacts are non-deterministic
-      | editPlanFnOutputs filterIvycacheFiles
+      | setPlanLocalOnly True
+      # Own all files in ivycache, even if they were prefetched by Wit
+      | setPlanFnOutputs (\_ listIvycache Unit)
       | runJob
       | getJobOutputs
-  newIvyCacheDeps ++ existing
 
 
 # Memoized tree for converting from Strings to Paths to jars in Coursier cache
 target ivyCacheJars Unit =
   def isJar = matches `.*\.jar` _.getPathName
-  ivyCacheDeps Unit
+  ivyCacheDeps
   | filter isJar
   | mapPartial (\p p.getPathName.stripIvyPathPrefix | omap (Pair _ p))
   | listToTree cmpIvyCachePair
@@ -122,7 +113,7 @@ global def getIvyDepJar dep =
 # Returns paths to dep jars and transitive dependencies
 global def resolveIvyDeps deps =
   def depStrs = map ivyDepToString deps
-  def cachedDeps = ivyCacheDeps Unit
+  def cachedDeps = ivyCacheDeps
   def job =
     def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache, "-m", "offline", depStrs
     makePlan cmd (coursierBin, cachedDeps)

@@ -3,7 +3,6 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v2
     - name: Run tests
@@ -15,3 +14,24 @@ jobs:
           --rm \
           sifive/environment-blockci:0.3.0 \
           tests/run-tests.sh
+
+  test-no-network:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Test that builds work without internet access
+      run: |
+        set -euo pipefail
+        docker run \
+          --volume="$GITHUB_WORKSPACE:/mnt/workspace" \
+          --workdir="/mnt/workspace" \
+          --rm \
+          sifive/environment-blockci:0.3.0 \
+          tests/setup-tests.sh
+        docker run \
+          --volume="$GITHUB_WORKSPACE:/mnt/workspace" \
+          --workdir="/mnt/workspace" \
+          --rm \
+          --network none \
+          sifive/environment-blockci:0.3.0 \
+          wake compileScalaModule exampleScalaModule
