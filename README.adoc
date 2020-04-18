@@ -59,18 +59,48 @@ For example, `"my.org:::cool-project:1.0.0"` would expand to `"my.org:cool-proje
 [#coursier]
 === Coursier
 
-API Scala SiFive uses https://get-coursier.io/[Coursier] to resolve and fetch dependencies.
+API Scala SiFive uses https://get-coursier.io/docs/2.0.0-RC4-1/overview[Coursier] to resolve and fetch dependencies.
 Of particular interest are Couriser environment variables that allow the user to control fetching and resolution.
 For example, by default, coursier only fetches from the local cache and maven central,
 but to enable additional repositories, one can set the `COURSIER_REPOSITORIES` environment variable.
-
 Please see linked Coursier documentation above for more information.
+
+Note that Wake isolates jobs from the user's environment; environment variables like `PATH` or the Coursier variables
+are **not** propagated to Wake jobs.
+To set Coursier-specific environment variables, include a `.wake` file in your workspace that publishes
+to the `environment` topic.
+For example:
+----
+publish environment =
+  "COURSIER_REPOSITORIES=sonatype:releases", Nil
+----
+This will have the effect of setting the `COURSIER_REPOSITORIES` variable in the Wake job environment causing Coursier
+to use the Sonatype Releases repository instead of Maven Central.
+
+=== Fetching and offline use
+
+Dependency fetching is decoupled from dependency resolution for compilation.
+This means that internet access is only required when new dependencies need to be fetched.
+Compiling and running compiled code does not require internet access.
+
+`ivydependencies.json` files found in the root of packages and the root of the workspace will be used
+for dependency fetching.
+This fetching is based soley on the contents of the `ivydependencies.json` files.
+Fetching is a top-level Wake job so any job-running invocation of wake will cause dependencies to be fetched.
+For example:
+
+[source,bash]
+----
+# Creates workspace but does not run jobs
+$ wake --init .
+# Runs all top-level jobs including api-scala-sifive dependency fetching
+$ wake
+----
 
 == Wake API
 
 The Wake API is a set of Wake data structures and functions that allow Wake to build Scala projects.
-Similarly to how dependencies are fetched, the build rules use <<coursier, Coursier>> to resolve dependencies;
-however, to enable offline use, the Wake rules disable _fetching_, delegating that responsibility to Wit.
+Similarly to how dependencies are fetched, the build rules use <<coursier, Coursier>> to resolve dependencies.
 
 The primary data structure of Scala builds in Wake are `ScalaModules`
 (discussed in more detail <<scalamodule, later>>).
@@ -122,7 +152,8 @@ global def exampleScalaModule =
 
 Published dependencies are specified as <<ivy-deps-json, previously discussed>> in `ivydependencies.json`.
 The JSON will be used to populate the `IvyDeps` of the `ScalaModule`.
-You can set these dependencies directly, but unless they are fetched and stored in the workspace by Wit, these Wake rules will not be able to find them.
+You can set these dependencies directly, but unless they are included in an `ivydependencies.json` file,
+they will not be fetched and compilation will fail.
 
 Source dependencies are specified as a `List` of ``ScalaModule``s in the `Deps` field of the `ScalaModule`.
 For example, we can add modify our earlier example to have a dependency on `someScalaModule`:
@@ -187,7 +218,7 @@ tuple ScalaModule =
 
 === Running tests locally
 
-You must first have `wake` (v0.17.1).
+You must first have `wake` (`v0.17.1`).
 
 ----
 # from the root of the repository
@@ -195,7 +226,7 @@ You must first have `wake` (v0.17.1).
 ----
 
 Note that run-tests.sh emulates the `preinstall` behavior which is based on Wit
-<= v0.12.0 Scala plugin fetching behavior.
-It will fetch all ivydependencies.json files that are one directory below tests/.
+&lt;= v0.12.0 Scala plugin fetching behavior.
+It will fetch all ivydependencies.json files that are one directory below `tests/`.
 Putting an ivydependencies.json file in a directory deeper than that prevents
 it from being fetched by `run-tests.sh`.
