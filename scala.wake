@@ -1,14 +1,13 @@
 
 # Important directories
 def buildRoot = mkdir "build"
-def root = mkdir "{buildRoot.getPathName}/{here}"
-def bloopDir = mkdir "{root.getPathName}/bloop"
-def bloopInstall = "scala"
+def root = mkdir "{buildRoot.getPathName}/api-scala-sifive"
+def scalaInstall = "scala"
 # Where I expect Scala Ivy dependencies to be downloaded
 def ivyCache = "ivycache"
-# Python wrapper script for invoking bloop
-def bloopWake = source "{here}/bloop_wake"
 def resources = "python/python/3.7.1", "openjdk/java/1.8.0", Nil
+# Where mill should keep its metadata
+def millHome = "{scalaInstall}/mill_home"
 
 global def readIvyDepsJSON dir =
   source "{dir}/ivydependencies.json" | parseJSONFile
@@ -21,15 +20,18 @@ global def fetchScala Unit =
 
 publish preinstall = fetchScala, Nil
 
-target fetchCoursier Unit =
-  def bin = source "{here}/fetch_coursier"
-  def dir = mkdir bloopInstall
+def runDepFetchScript script =
+  def bin = source script
+  def dir = mkdir scalaInstall
   def deps = sources here `.*\.py`
   makePlan (bin.getPathName, dir.getPathName, Nil) (bin, dir, deps)
   | setPlanResources resources
   | editPlanEnvironment ("PYTHONDONTWRITEBYTECODE=1", _)
   | runJob
   | getJobOutput
+
+target fetchCoursier Unit = runDepFetchScript "{here}/fetch_coursier"
+target fetchMill Unit = runDepFetchScript "{here}/fetch_mill"
 
 # Get ivydependencies.json files 0 or 1 levels under workspace root, or that
 # are explicitly published.
@@ -48,9 +50,9 @@ def ivyDepsFiles =
 target ivyCacheDeps Unit =
   def coursierBin = fetchCoursier Unit
   def bin = source "{here}/fetch_ivy_dependencies"
-  def dir = mkdir bloopInstall
+  def dir = mkdir scalaInstall
   def cache = mkdir ivyCache
-  def otherDeps = source "{here}/lib/scala-bridge-fetcher_2.12-0.1.0.jar", sources here `.*\.py`
+  def otherDeps = sources here `.*\.py`
   def cmd =
     "python3", bin.getPathName, "--scala-dir", dir.getPathName, "--cache-dir",
     cache.getPathName, map getPathName ivyDepsFiles
@@ -88,7 +90,7 @@ def ivyDepToCoursierCache (IvyDep org name rev) =
 def cmpIvyCachePair (Pair n1 _) (Pair n2 _) = n1 <=>* n2
 
 def getIvyDepJars filenames =
-  def dummyPath = bloopWake # A explicitly dummy path
+  def dummyPath = root # A explicitly dummy path
   def pairs = map (Pair _ dummyPath) filenames
   def mtree = listToTree cmpIvyCachePair pairs
   (ivyCacheJars Unit) ∩ mtree | treeToList | map getPairSecond
@@ -106,15 +108,21 @@ global def getIvyDepJar dep =
 
 # TODO
 # - Can we make this a fuse job? For some reason coursier can't find visible inputs
+# - Should this be public?
 # Determines transitive ivy dependencies
-# Given List IvyDep, returns List Path
+# Given Scala Version (Option), List IvyDep, returns List Path
 # Returns paths to dep jars and transitive dependencies
-global target resolveIvyDeps deps =
+target resolveIvyDepsImpl scalaVersionOpt deps =
   def coursierBin = fetchCoursier Unit
   def depStrs = map ivyDepToString deps
   def cachedDeps = ivyCacheDeps Unit
+  def coursierArgs =
+    def base = "-q", "--cache", ivyCache, "-m", "offline", depStrs
+    match scalaVersionOpt
+      None    = base
+      Some sv = "--scala-version", sv.scalaVersionToString, base
   def job =
-    def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache, "-m", "offline", depStrs
+    def cmd = coursierBin.getPathName, "fetch", coursierArgs
     makePlan cmd (coursierBin, cachedDeps)
     | setPlanLocalOnly True
     | runJob
@@ -135,6 +143,7 @@ global target resolveIvyDeps deps =
       def jars = getIvyDepJars fns
       if jars.len != fns.len then err jars fns else jars
 
+global def resolveIvyDeps deps = resolveIvyDepsImpl None deps
 
 # TODO improve
 global def runIvyDep dep = resolveIvyDeps (dep, Nil) | runJava
@@ -337,143 +346,137 @@ global def getScalaModuleTransIvyDeps module =
   def cmp = _.unexpandedIvyDepToString <=>* _.unexpandedIvyDepToString
   allMods | mapFlat getScalaModuleIvyDeps | distinctBy cmp
 
-# Prefix with wildcard for the workspace
-def inws path = "$WORKSPACE/{path}"
-
-# TODO implement scalacOptions
-def bloopScalaLibJSON scalaVersion scalacOptions =
-  def ivyDep = scalaCompilerIvyDep scalaVersion
-  def ivyJars = resolveIvyDeps (ivyDep, Nil)
-  def jars = ivyJars | map getPathName | map inws | map JString | JArray
-  JObject (
-    "organization" → JString ivyDep.getIvyDepOrg,
-    "name"         → JString ivyDep.getIvyDepName,
-    "version"      → JString ivyDep.getIvyDepRev,
-    "options"      → scalacOptions | map JString | JArray,
-    "jars"         → jars,
-    "setup" → JObject (
-      "order" → JString "mixed",
-      "addLibraryToBootClasspath" → JBoolean True,
-      "addCompilerToClasspath" → JBoolean False,
-      "addExtraJarsToClasspath" → JBoolean False,
-      "manageBootClasspath" → JBoolean True,
-      "filterLibraryFromClasspath" → JBoolean True,
-      Nil
-    ),
-    Nil
-  )
-
-def buildDir module =
-  def suffix = module.getScalaModuleScalaVersion.scalaVersionMajorString
-  "{buildRoot.getPathName}/{module.getScalaModuleName}/scala-{suffix}"
-def bloopOutDir module = "{bloopDir.getPathName}/{module.getScalaModuleName}"
-def moduleClassesDir module = "{module.buildDir}/classes"
-
-# Assumes ScalaModule itself is valid
-def bloopScalaModuleJSON module =
+# TODO
+#  - Calculate the relative path from build.sc to workspace root instead of ../../../..
+global def genMillBuild module =
   def name = module.getScalaModuleName
-  def dir = module.getScalaModuleRootDir
-  def ver = module.getScalaModuleScalaVersion
+  def scalaVersion = module.getScalaModuleScalaVersion
+  def stringsToPrettyString strs =
+    strs
+    | map ("    \"{_}\"")
+    | catWith ",\n"
+  def pathsToPrettyString paths =
+    paths
+    | map getPathName
+    | stringsToPrettyString
+  def srcs = module.getScalaModuleAllSourceFiles | pathsToPrettyString
+  def resources = module.getScalaModuleResourceFiles | pathsToPrettyString
+  def deps =
+    def ivyDepsJars =
+      module.getScalaModuleTransIvyDeps
+      | map (expandIvyDep scalaVersion)
+      | resolveIvyDepsImpl (Some scalaVersion)
+    def depJars =
+      module.getScalaModuleTransDeps
+      | map compileScalaModule
+    depJars ++ ivyDepsJars
+    | pathsToPrettyString
+  def pluginJars =
+    module.getScalaModuleCompilerPlugins
+    | map (expandIvyDep scalaVersion)
+    | map getIvyDepJar
+  def scalacOpts =
+    def baseOpts = module.getScalaModuleScalacOptions
+    def pluginOpts =
+      pluginJars
+      | map getPathName
+      | map ("-Xplugin:../../../{_}")
+    baseOpts ++ pluginOpts
+    | stringsToPrettyString
+  "%
+    // DO NOT MODIFY
+    // This file is autogenerated by api-scala-sifive
+    import mill._, scalalib._, os._
+    object `%{name}` extends ScalaModule {
+      def scalaVersion = "%{scalaVersion.scalaVersionToString}"
+      def sourceFiles = Seq(
+    %{srcs}
+      )
+      def depJars = Seq(
+    %{deps}
+      )
+      def resourceFiles = Seq(
+    %{resources}
+      )
+      def sources = T.sources {
+        sourceFiles.map(f => PathRef(millSourcePath / RelPath(s"../../../../$f")))
+      }
+      def unmanagedClasspath = T {
+        depJars.map(f => PathRef(millSourcePath / RelPath(s"../../../../$f")))
+      }
+      def resources = T.sources {
+        resourceFiles.map(f => PathRef(millSourcePath / RelPath(s"../../../../$f")))
+      }
+      def scalacOptions = Seq[String](
+    %{scalacOpts}
+      )
+    }
+    %"
+
+# TODO should we add Scala version to path?
+#    We might be able to get mill to do this
+def millBuildDir module =
+  "{root.getPathName}/{module.getScalaModuleName}"
+
+target millBuildFile name \ module =
+  def text = genMillBuild module
+  def filename = "{millBuildDir module}/build.sc"
+  write filename text
+
+def formatError job plan =
+  def stdout = job.getJobStdout | getWhenFail ""
+  def stderr = job.getJobStderr | getWhenFail ""
+  def cmd = plan.getPlanCommand | catWith " "
+  "FAILED: '{cmd}'\nSTDOUT: {stdout}\nSTDERR: {stderr}"
+
+# Compiles a ScalaModule returns generated jar
+target memoizeMillCompile name \ module =
+  def millBin = fetchMill Unit
+  # Build dir within which we run the mill process
+  def buildDir = millBuildDir module
+  def outDir = "{buildDir}/out"
+  def jarName = "{outDir}/{name}/jar/dest/out.jar"
+  # Relative paths for running the job in buildDIr
+  def relMillBin = relative buildDir millBin.getPathName
+  def relMillHome = relative buildDir millHome
+  def relIvyCache = relative buildDir ivyCache
+
   def transDeps = module.getScalaModuleTransDeps
-  def ivyClasspath =
-    def ivyDeps = module.getScalaModuleTransIvyDeps
-    def deps = map (expandIvyDep ver) ivyDeps
-    def scalaCompiler = module.getScalaModuleScalaVersion.scalaCompilerIvyDep
-    resolveIvyDeps (scalaCompiler, deps) | map getPathName
-  def scalaJSON =
-    def scalacOpts =
-      def getPluginOpt dep = expandIvyDep ver dep | getIvyDepJar | getPathName | inws | ("-Xplugin:{_}")
-      module.getScalaModuleScalacOptions ++ (map getPluginOpt module.getScalaModuleCompilerPlugins)
-    bloopScalaLibJSON ver scalacOpts
-  def bloopVersion = "1.2.5"
-  def depClasspath = transDeps | map moduleClassesDir
-  def sourceFiles = module.getScalaModuleAllSourceFiles | map getPathName
-  def resourceDirs = module.getScalaModuleExpandedResourceDirs
-  JObject (
-    "version" → JString bloopVersion,
-    "project" → JObject (
-      "name" → JString name,
-      "directory" → JString dir.inws,
-      "sources" → sourceFiles | map inws | map JString | JArray,
-      # Until bloop incremental compilation works when invoked as CLI, lie about dependencies
-      #"dependencies" → map getScalaModuleName modDeps | map JString | JArray,
-      "dependencies" → JArray Nil,
-      "classpath" → ivyClasspath ++ depClasspath | map inws | map JString | JArray,
-      "out" → module.bloopOutDir.inws | JString,
-      "classesDir" → module.moduleClassesDir.inws | JString,
-      "resources" → resourceDirs | map inws | map JString | JArray,
-      "scala" → scalaJSON,
-      Nil
-    ),
-    Nil
-  )
-
-# TODO is this necessary anymore?
-target memoizeBloopTemplate name \ module =
-  def content = bloopScalaModuleJSON module | prettyJSON
-  write (bloopTemplateName module) content
-def bloopTemplate module =
-  memoizeBloopTemplate module.getScalaModuleName module
-
-def bloopTemplateName module =
-  def name = module.getScalaModuleName
-  "{bloopDir.getPathName}/{name}.json.template"
-
-def bloopConfigName module =
-  def name = module.getScalaModuleName
-  "{bloopDir.getPathName}/{name}.json"
-
-# Compiles a ScalaModule, returns bloop config and generated jar file
-target memoizeBloopCompile name \ module =
-  def bin = bloopWake
-  def transDeps = module.getScalaModuleTransDeps
-  def configTemplate = module.bloopTemplate
-  def configFilename = module.bloopConfigName
-  def jarDir = mkdir "{module.buildDir}/jar"
-  def jarName = "{jarDir.getPathName}/{name}.jar"
+  def buildFile = millBuildFile name module
   def inputs =
     def sourceFiles = module.getScalaModuleAllSourceFiles ++ module.getScalaModuleResourceFiles
     def depJars = map compileScalaModule transDeps
-    def configs = map bloopConfig transDeps
-    bin, configTemplate, configs ++ depJars ++ sourceFiles
+    millBin, buildFile, depJars ++ sourceFiles ++ (ivyCacheDeps Unit)
     | sortBy (_.getPathName <* _.getPathName) # Sorted to ensure hash is stable
   # This is a hack to ensure that changes to visible files rerun the job
   # We give directories as inputs to Bloop which then looks in those directories so new files m
   def visibleHashHack =
     def hash = (\x prim "hash") inputs
     "VISIBLE_FILES_HASH_HACK={format hash}"
-  def bloopArgs =
-    def args = "compile", "-c", bloopDir.getPathName, module.getScalaModuleName, Nil
-    args | catWith " "
   def cmd =
-    "python3", bin.getPathName, "-t", configTemplate.getPathName, "-c", configFilename , "-b", bloopInstall
-    , "--coursier-cache", ivyCache, "--bloop-args", bloopArgs, "--jar", jarName, Nil
+    "bash", relMillBin, "--no-default-predef", "--home", relMillHome, "show", "{name}.jar", Nil
   def plan =
     makePlan cmd inputs
-    | editPlanEnvironment ("JAVA_OPTS=-Xss8M", visibleHashHack, _)
-    | setPlanFnInputs (\_ inputs | map getPathName)
+    | editPlanEnvironment ("COURSIER_CACHE={relIvyCache}", visibleHashHack, _)
+    | setPlanLabel "Compiling {name}..."
+    | setPlanDirectory buildDir
+    # Mill uses the entire classpath for caching so it must be local only for incremental compile
     | setPlanLocalOnly True
-    | setPlanFnOutputs (\_ configFilename, jarName, Nil)
+    | setPlanFnOutputs (\_ jarName, Nil)
     | setPlanResources resources
-    | runJob
-  def err paths = Fail (makeError "Expected exactly one json and one jar, got {format paths}")
-  def result = match plan.getJobOutputs
-    json, jar, Nil = Pass (Pair json jar)
-    # If the job fails, it returns 1 BadPath
-    one, Nil       = one.getPathError | omap Fail | getOrElse (err (one, Nil))
-    l              = err l
-  # Compose possible errors
-  module.scalaModuleToResult
-  | rmapPass (\_ result)
-def bloopCompile module = memoizeBloopCompile module.getScalaModuleName module
+    | setPlanStdout logVerbose
+    | setPlanStderr logVerbose
+  def echoOnError job path = match path.getPathError
+    None   = path
+    Some e =
+      def _ = print (formatError job plan)
+      path
+  def job = plan | runJob
+  job
+  | getJobOutput
+  | echoOnError job
 
-def bloopConfig module = match module.bloopCompile
-  Pass (Pair f _) = f
-  Fail err        = makeBadPath err
-
-global def compileScalaModule module = match module.bloopCompile
-  Pass (Pair _ s) = s
-  Fail err        = makeBadPath err
+global def compileScalaModule module = memoizeMillCompile module.getScalaModuleName module
 
 # Returns the full classpath to run the module
 global def scalaModuleClasspath module =

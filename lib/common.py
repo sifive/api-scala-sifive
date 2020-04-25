@@ -8,3 +8,11 @@ def is_existing_dir(arg):
         raise argparse.ArgumentTypeError(msg)
     else:
         return arg
+
+
+def is_existing_file(arg):
+    if not os.path.isfile(arg):
+        msg = "File {} does not exist!".format(arg)
+        raise argparse.ArgumentTypeError(msg)
+    else:
+        return arg
