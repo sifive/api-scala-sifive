@@ -66,7 +66,7 @@ def ivyCacheDeps =
   def bin = source "{here}/fetch_ivy_dependencies"
   def dir = mkdir scalaInstall
   def cache = mkdir ivyCache
-  def otherDeps = source "{here}/lib/scala-bridge-fetcher_2.12-0.1.0.jar", sources here `.*\.py`
+  def otherDeps = sources here `.*\.py`
   def cmd =
     "python3", bin.getPathName, "--scala-dir", dir.getPathName, "--cache-dir",
     cache.getPathName, map getPathName ivyDepsFiles
