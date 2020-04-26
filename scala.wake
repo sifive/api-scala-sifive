@@ -364,9 +364,14 @@ global def genMillBuild module =
     | catWith ",\n"
   def srcs = module.getScalaModuleAllSourceFiles | pathsToPrettyString
   def deps =
-    module.getScalaModuleTransIvyDeps
-    | map (expandIvyDep scalaVersion)
-    | resolveIvyDeps
+    def ivyDepsJars =
+      module.getScalaModuleTransIvyDeps
+      | map (expandIvyDep scalaVersion)
+      | resolveIvyDeps
+    def depJars =
+      module.getScalaModuleTransDeps
+      | map compileScalaModule
+    depJars ++ ivyDepsJars
     | pathsToPrettyString
   "%
     // DO NOT MODIFY
@@ -416,8 +421,7 @@ target memoizeMillCompile name \ module =
   def buildFile = millBuildFile name module
   def inputs =
     def sourceFiles = module.getScalaModuleAllSourceFiles ++ module.getScalaModuleResourceFiles
-    # def depJars = map compileScalaModule transDeps
-    def depJars = Nil # FIXME
+    def depJars = map compileScalaModule transDeps
     millBin, buildFile, depJars ++ sourceFiles ++ ivyCacheDeps
     | sortBy (_.getPathName <* _.getPathName) # Sorted to ensure hash is stable
   # This is a hack to ensure that changes to visible files rerun the job
