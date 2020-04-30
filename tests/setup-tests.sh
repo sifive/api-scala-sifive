@@ -4,6 +4,7 @@ set -euvo pipefail
 
 # This script assumes that it is running from the root of api-scala-sifive
 fetch_coursier=./fetch_coursier
+fetch_mill=./fetch_mill
 fetch_ivy_dependencies=./fetch_ivy_dependencies
 tests_path=tests
 
@@ -22,5 +23,6 @@ done
 mkdir -p scala
 mkdir -p ivycache
 $fetch_coursier scala
+$fetch_mill scala
 ivy_dep_files=$(find $tests_path -maxdepth 2 -name 'ivydependencies.json')
 $fetch_ivy_dependencies --scala-dir scala --cache-dir ivycache $ivy_dep_files

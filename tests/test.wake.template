@@ -10,7 +10,6 @@ global def runAPIScalaSiFiveTests Unit =
 
 def repoRoot = simplify "{here}/.."
 def pythonUtils = sources "{repoRoot}" `.*\.py`
-def bridgeFetcher = source "{repoRoot}/lib/scala-bridge-fetcher_2.12-0.1.0.jar"
 
 global def testNameFromDir dir =
   extract `tests/(.*)` dir
@@ -22,7 +21,7 @@ global def testNameFromDir dir =
 #   Will propagate `previousResult` if `previousResult` is a Fail or result of check is Pass
 #     otherwise, returns Fail with `msg`
 # (has: Boolean) => (paths: List Path) => (fileRegex: RegExp) => (msg: String) => (previousResult: Result a Error) => Result a Error
-global def assertFile has paths fileRegex msg previousResult =
+def assertFile has paths fileRegex msg previousResult =
   def pathsFail = paths | map getPathResult | findFail
   def regExp = regExpCat (`.*`, fileRegex, Nil)
   def found = find (matches regExp _.getPathName) paths
@@ -44,13 +43,16 @@ global def assertNotHasRegex paths = assertFile False paths
 
 
 # TODO Move this into main code as package private function
-global def fetchCoursier dest =
-  def bin = source "{repoRoot}/fetch_coursier"
+def fetchDep name dest =
+  def bin = source "{repoRoot}/{name}"
   makePlan (bin.getPathName, dest.getPathName, Nil) (bin, dest, pythonUtils)
   | editPlanEnvironment ("PYTHONDONTWRITEBYTECODE=1", _)
   | setPlanStderr logVerbose # Suppress default printing
   | runJob
   | getJobOutput
+
+def fetchCoursier = fetchDep "fetch_coursier"
+def fetchMill     = fetchDep "fetch_mill"
 
 # Run standard Scala fetching into dir
 global def fetchScala buildDir ivyDepsFiles =
@@ -58,14 +60,15 @@ global def fetchScala buildDir ivyDepsFiles =
   def scalaDir = mkdir "{dir.getPathName}/scala"
   def cacheDir = mkdir "{dir.getPathName}/ivycache"
   def coursier = fetchCoursier scalaDir
+  def mill = fetchMill scalaDir
   def bin = source "{repoRoot}/fetch_ivy_dependencies"
   def ivyNames = ivyDepsFiles | map (_.getPathName)
   def cmd = bin.getPathName, "--scala-dir", scalaDir.getPathName, "--cache-dir", cacheDir.getPathName, ivyNames
   def fetched =
-    makePlan cmd (bin, coursier, scalaDir, cacheDir, bridgeFetcher, pythonUtils ++ ivyDepsFiles)
+    makePlan cmd (bin, coursier, mill, scalaDir, cacheDir, pythonUtils ++ ivyDepsFiles)
     | editPlanEnvironment ("PYTHONDONTWRITEBYTECODE=1", _)
     | setPlanStderr logVerbose # Suppress intentional failure printing to stderr
     | runJob
     | getJobOutputs
-  coursier, fetched
+  mill, coursier, fetched
 

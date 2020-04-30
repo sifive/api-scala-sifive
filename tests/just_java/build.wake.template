@@ -7,6 +7,6 @@ def test Unit =
   def checkNotRegex = assertNotHasRegex fetched
   Pass here.testNameFromDir
   | checkFor "antlr4-4.7.2.jar" "We should find ANTLR"
-  | checkNotRegex `.*scala.*` "We should NOT find Scala"
+  | checkNotRegex `.*scala-lang.*` "We should NOT find Scala"
 
 publish apiScalaSiFiveTests = test, Nil

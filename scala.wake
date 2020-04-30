@@ -1,7 +1,7 @@
 
 # Important directories
 def buildRoot = mkdir "build"
-def root = mkdir "{buildRoot.getPathName}/{here}"
+def root = mkdir "{buildRoot.getPathName}/api-scala-sifive"
 def scalaInstall = "scala"
 # Where I expect Scala Ivy dependencies to be downloaded
 def ivyCache = "ivycache"
@@ -363,6 +363,7 @@ global def genMillBuild module =
     | map ("    \"{_}\"")
     | catWith ",\n"
   def srcs = module.getScalaModuleAllSourceFiles | pathsToPrettyString
+  def resources = module.getScalaModuleResourceFiles | pathsToPrettyString
   def deps =
     def ivyDepsJars =
       module.getScalaModuleTransIvyDeps
@@ -385,11 +386,17 @@ global def genMillBuild module =
       def depJars = Seq(
     %{deps}
       )
+      def resourceFiles = Seq(
+    %{resources}
+      )
       def sources = T.sources {
         sourceFiles.map(f => PathRef(millSourcePath / RelPath(s"../../../../$f")))
       }
       def unmanagedClasspath = T {
         depJars.map(f => PathRef(millSourcePath / RelPath(s"../../../../$f")))
+      }
+      def resources = T.sources {
+        resourceFiles.map(f => PathRef(millSourcePath / RelPath(s"../../../../$f")))
       }
     }
     %"
