@@ -1,0 +1,12 @@
+def scalaModule =
+  makeScalaModuleFromJSON here "scalac_options"
+  | setScalaModuleScalacOptions ("-Xfatal-warnings", Nil)
+
+def test Unit =
+  compileScalaModule scalaModule
+  | getPathResult
+  | getFail
+  | omap (\_ here.testNameFromDir)
+  | getOrFail ("Compilation should have failed but it succeeded!".makeError)
+
+publish apiScalaSiFiveTests = test, Nil
