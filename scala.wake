@@ -8,6 +8,7 @@ def bloopInstall = "scala"
 def ivyCache = "ivycache"
 # Python wrapper script for invoking bloop
 def bloopWake = source "{here}/bloop_wake"
+def resources = "python/python/3.7.1", Nil # TODO add java
 
 global def readIvyDepsJSON dir =
   source "{dir}/ivydependencies.json" | parseJSONFile
@@ -17,6 +18,7 @@ def fetchCoursier Unit =
   def dir = mkdir bloopInstall
   def deps = sources here `.*\.py`
   makePlan (bin.getPathName, dir.getPathName, Nil) (bin, dir, deps)
+  | setPlanResources resources
   | editPlanEnvironment ("PYTHONDONTWRITEBYTECODE=1", _)
   | runJob
   | getJobOutput
@@ -63,6 +65,7 @@ def ivyCacheDeps =
     Nil = Nil
     _   =
       makePlan cmd allDeps
+      | setPlanResources resources
       | editPlanEnvironment ("PYTHONDONTWRITEBYTECODE=1", _)
       | setPlanLocalOnly True
       # Own all files in ivycache, even if they were prefetched by Wit
@@ -456,6 +459,7 @@ target memoizeBloopCompile name \ module =
     | setPlanFnInputs (\_ inputs | map getPathName)
     | setPlanLocalOnly True
     | setPlanFnOutputs (\_ configFilename, jarName, Nil)
+    | setPlanResources resources
     | runJob
   def err paths = Fail (makeError "Expected exactly one json and one jar, got {format paths}")
   def result = match plan.getJobOutputs
