@@ -8,7 +8,7 @@ def bloopInstall = "scala"
 def ivyCache = "ivycache"
 # Python wrapper script for invoking bloop
 def bloopWake = source "{here}/bloop_wake"
-def resources = "python/python/3.7.1", Nil # TODO add java
+def resources = "python/python/3.7.1", "openjdk/java/1.8.0", Nil
 
 global def readIvyDepsJSON dir =
   source "{dir}/ivydependencies.json" | parseJSONFile
@@ -148,10 +148,11 @@ global def runIvyDep dep = resolveIvyDeps (dep, Nil) | runJava
 # - Add Java options (eg. -Xmx4G)
 # visible excludes classpath
 global def runJava classpath main args visible =
-  def java = which "java"
   def cp = map getPathName classpath | catWith ":"
-  def cmd = java, "-cp", cp, main, args
-  job cmd (visible ++ classpath)
+  def cmd = "java", "-cp", cp, main, args
+  makePlan cmd (visible ++ classpath)
+  | setPlanResources ("openjdk/java/1.8.0", Nil)
+  | runJob
 
 # TODO Dotty support?
 tuple ScalaVersion =
