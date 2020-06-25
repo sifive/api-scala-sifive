@@ -50,11 +50,11 @@ def coursierBin =
 # the workspace root where Wit fetches dependencies in ivydependencies.json
 # located at the root of packages.
 def ivyDepsFiles =
-  def addSuffix suffix str = cat (str, suffix, Nil)
-  def published = map (addSuffix "/ivydependencies.json") (subscribe ivyDepLocations) | map source
+  def addSuffix suffix str = "{str}{suffix}"
+  def published = subscribe ivyDepLocations | map (addSuffix "/ivydependencies.json") | map source
   def traversed = sources "." `[^/]*/?ivydependencies\.json`
   def pathCmp a b = scmp a.getPathName b.getPathName
-  distinctBy pathCmp (traversed ++ published)
+  traversed ++ published | distinctBy pathCmp
 
 # Job that fetches ivy dependencies
 def ivyCacheDeps =
