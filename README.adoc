@@ -218,7 +218,7 @@ tuple ScalaModule =
 
 === Running tests locally
 
-You must first have `wake` (`v0.17.1`).
+You must first have `wake` (`v0.17.2`).
 
 ----
 # from the root of the repository

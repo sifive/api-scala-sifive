@@ -12,7 +12,7 @@ jobs:
           --volume="$GITHUB_WORKSPACE:/mnt/workspace" \
           --workdir="/mnt/workspace" \
           --rm \
-          sifive/environment-blockci:0.3.0 \
+          sifive/environment-blockci:0.4.0 \
           tests/run-tests.sh
 
   test-no-network:
@@ -26,12 +26,12 @@ jobs:
           --volume="$GITHUB_WORKSPACE:/mnt/workspace" \
           --workdir="/mnt/workspace" \
           --rm \
-          sifive/environment-blockci:0.3.0 \
+          sifive/environment-blockci:0.4.0 \
           tests/setup-tests.sh
         docker run \
           --volume="$GITHUB_WORKSPACE:/mnt/workspace" \
           --workdir="/mnt/workspace" \
           --rm \
           --network none \
-          sifive/environment-blockci:0.3.0 \
+          sifive/environment-blockci:0.4.0 \
           wake compileScalaModule exampleScalaModule
