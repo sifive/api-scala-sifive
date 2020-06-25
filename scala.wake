@@ -44,11 +44,17 @@ def coursierBin =
     Nil      = fetchCoursier Unit
     l        = makeBadPath (makeError "Multiple coursier executables found! {catWith ", " l}")
 
-# Only get ivydependencies.json files 0 or 1 levels under workspace root
-# This emulates Wit <= 0.12 behavior where packages are placed directly below
-# the workspace root and Wit fetches dependencies in ivydependencies.json
+# Get ivydependencies.json files 0 or 1 levels under workspace root, or that
+# are explicitly published.
+# 0/1 levels emulates Wit <= 0.12 behavior where packages are placed directly below
+# the workspace root where Wit fetches dependencies in ivydependencies.json
 # located at the root of packages.
-def ivyDepsFiles = sources "." `[^/]*/?ivydependencies\.json`
+def ivyDepsFiles =
+  def addSuffix suffix str = "{str}{suffix}"
+  def published = subscribe ivyDepLocations | map (addSuffix "/ivydependencies.json") | map source
+  def traversed = sources "." `[^/]*/?ivydependencies\.json`
+  def pathCmp a b = scmp a.getPathName b.getPathName
+  traversed ++ published | distinctBy pathCmp
 
 # Job that fetches ivy dependencies
 def ivyCacheDeps =
