@@ -398,7 +398,6 @@ def bloopScalaModuleJSON module =
     bloopScalaLibJSON ver scalacOpts
   def bloopVersion = "1.2.5"
   def depClasspath = transDeps | map moduleClassesDir
-  def genSrcs = module.getScalaModuleGeneratedSources
   def sourceFiles = module.getScalaModuleAllSourceFiles | map getPathName
   def resourceDirs = module.getScalaModuleExpandedResourceDirs
   JObject (
@@ -437,7 +436,6 @@ def bloopConfigName module =
 
 # Compiles a ScalaModule, returns bloop config and generated jar file
 target memoizeBloopCompile name \ module =
-  def statedir = mkdir module.bloopOutDir
   def bin = bloopWake
   def transDeps = module.getScalaModuleTransDeps
   def configTemplate = module.bloopTemplate
