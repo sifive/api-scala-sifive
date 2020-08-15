@@ -55,16 +55,12 @@ target ivyCacheDeps Unit =
     "python3", bin.getPathName, "--scala-dir", dir.getPathName, "--cache-dir",
     cache.getPathName, map getPathName ivyDepsFiles
   def allDeps = bin, dir, cache, coursierBin, otherDeps ++ ivyDepsFiles
-  def listIvycache Unit = files ivyCache `.*`
   match ivyDepsFiles
     Nil = Nil
     _   =
       makePlan cmd allDeps
       | setPlanResources resources
       | editPlanEnvironment ("PYTHONDONTWRITEBYTECODE=1", _)
-      | setPlanLocalOnly True
-      # Own all files in ivycache, even if they were prefetched by Wit
-      | setPlanFnOutputs (\_ listIvycache Unit)
       | runJob
       | getJobOutputs
 
@@ -104,8 +100,6 @@ global def getIvyDepJar dep =
     Nil        = err Unit
     l          = panic "Found multiple jars for {dep.ivyDepToString}: {format l}"
 
-# TODO
-# - Can we make this a fuse job? For some reason coursier can't find visible inputs
 # Determines transitive ivy dependencies
 # Given List IvyDep, returns List Path
 # Returns paths to dep jars and transitive dependencies
@@ -116,7 +110,6 @@ global target resolveIvyDeps deps =
   def job =
     def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache, "-m", "offline", depStrs
     makePlan cmd (coursierBin, cachedDeps)
-    | setPlanLocalOnly True
     | runJob
   def strs =
     job
@@ -432,7 +425,7 @@ target memoizeBloopCompile name \ module =
   def jarDir = mkdir "{module.buildDir}/jar"
   def jarName = "{jarDir.getPathName}/{name}.jar"
   def inputs =
-    def sourceFiles = module.getScalaModuleAllSourceFiles ++ module.getScalaModuleResourceFiles
+    def sourceFiles = fetchCoursier Unit, module.getScalaModuleAllSourceFiles ++ module.getScalaModuleResourceFiles ++ sources here `lib/.*\.py`
     def depJars = map compileScalaModule transDeps
     def configs = map bloopConfig transDeps
     bin, configTemplate, configs ++ depJars ++ sourceFiles
@@ -451,9 +444,7 @@ target memoizeBloopCompile name \ module =
   def plan =
     makePlan cmd inputs
     | editPlanEnvironment ("JAVA_OPTS=-Xss8M", visibleHashHack, _)
-    | setPlanFnInputs (\_ inputs | map getPathName)
-    | setPlanLocalOnly True
-    | setPlanFnOutputs (\_ configFilename, jarName, Nil)
+    | editPlanEnvironment ("PYTHONDONTWRITEBYTECODE=1", _)
     | setPlanResources resources
     | runJob
   def err paths = Fail (makeError "Expected exactly one json and one jar, got {format paths}")
