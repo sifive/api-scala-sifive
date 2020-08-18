@@ -7,4 +7,4 @@ tests_path=tests
 
 $tests_path/setup-tests.sh
 
-wake runAPIScalaSiFiveTests Unit
+wake -x 'runAPIScalaSiFiveTests Unit'
