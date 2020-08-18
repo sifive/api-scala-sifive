@@ -4,32 +4,26 @@ jobs:
   test:
     name: Run all tests
     runs-on: ubuntu-latest
+
     steps:
     - uses: actions/checkout@v2
     - name: Run tests
-      run: |
-        set -euo pipefail
-        docker run \
-          --volume="$GITHUB_WORKSPACE:/mnt/workspace" \
-          --workdir="/mnt/workspace" \
-          --rm \
-          sifive/environment-blockci:0.4.0 \
-          tests/run-tests.sh
+      uses: sifive/environment-blockci-sifive/actions/shell@0.7.1
+      with:
+        command: tests/run-tests.sh
 
   test-no-network:
     name: Test without network access
     runs-on: ubuntu-latest
+
     steps:
     - uses: actions/checkout@v2
+
     - name: Fetch with network access
-      run: |
-        set -euo pipefail
-        docker run \
-          --volume="$GITHUB_WORKSPACE:/mnt/workspace" \
-          --workdir="/mnt/workspace" \
-          --rm \
-          sifive/environment-blockci:0.4.0 \
-          tests/setup-tests.sh
+      uses: sifive/environment-blockci-sifive/actions/shell@0.7.1
+      with:
+        command: tests/setup-tests.sh
+
     - name: Run sanity check without network access
       run: |
         set -euo pipefail
@@ -38,21 +32,5 @@ jobs:
           --workdir="/mnt/workspace" \
           --rm \
           --network none \
-          sifive/environment-blockci:0.4.0 \
-          wake compileScalaModule exampleScalaModule
-
-  test-wake-0-18:
-    name: Wake 0.18 typecheck
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: Install Wake 0.18
-      run: |
-        curl -L -o /tmp/wake.deb https://github.com/sifive/wake/releases/download/v0.18.1/ubuntu-18-04-wake_0.18.1-1_amd64.deb && \
-            sudo dpkg -i /tmp/wake.deb && \
-            rm /tmp/wake.deb
-    - name: Test that builds work without internet access
-      run: |
-        wake --version
-        wake --init .
-        wake -x Unit
+          sifive/environment-blockci:0.7.1 \
+          wake -x 'compileScalaModule exampleScalaModule | getPathResult'
