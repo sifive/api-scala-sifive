@@ -1,7 +1,7 @@
 
 def test Unit =
   def deps = ("foo", "bar", Nil) | map (source "{here}/{_}/ivydependencies.json")
-  def fetched = fetchScala "{here}/build" deps
+  def fetched = fetchScalaForTest "{here}/build" deps
   def checkFor = assertHasFile fetched
   Pass here.testNameFromDir
   | checkFor "json4s-native_2.12-3.6.1.jar" "We should find json4s 2.12"

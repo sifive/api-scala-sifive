@@ -2,7 +2,7 @@
 # We put our ivydependencies.json file in subdir/ so it isn't seen by run-tests.sh
 def test Unit =
   def deps = source "{here}/subdir/ivydependencies.json", Nil
-  def fetched = fetchScala "{here}/build" deps
+  def fetched = fetchScalaForTest "{here}/build" deps
   def checkFor = assertHasFile fetched
   def checkNot = assertNotHasFile fetched
   def checkForRegex = assertHasRegex fetched

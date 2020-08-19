@@ -13,8 +13,8 @@ def resources = "python/python/3.7.1", "openjdk/java/1.8.0", Nil
 # Use this to manually fetch scala dependencies, wake -x 'fetchScala Unit'
 global def fetchScala Unit =
   match (ivyCacheDeps Unit | map getPathResult | findFail)
-    Pass paths = Pass "ivyCacheDeps"
-    Fail err   = Fail err
+    Pass _paths = Pass "ivyCacheDeps"
+    Fail err    = Fail err
 
 publish preinstall = fetchScala, Nil
 
