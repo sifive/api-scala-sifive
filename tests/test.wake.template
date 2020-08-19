@@ -1,4 +1,5 @@
 
+global topic apiScalaSiFiveTests: Unit => Result String Error
 global def runAPIScalaSiFiveTests Unit =
   subscribe apiScalaSiFiveTests
   | map (_ Unit)
