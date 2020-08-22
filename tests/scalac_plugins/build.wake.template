@@ -1,0 +1,24 @@
+
+
+def scalaModule =
+  def base = makeScalaModuleFromJSON here "scalac_plugins"
+  def pluginIvyDeps = # This won't fail so have a dummy "or else" value
+    stringToIvyDep "com.github.ghik:::silencer-plugin:1.6.0"
+    | omap (_, Nil)
+    | getOrElse base.getScalaModuleIvyDeps
+  base
+  | setScalaModuleScalacOptions ("-deprecation", "-Xfatal-warnings", "-P:silencer:checkUnused", Nil)
+  | setScalaModuleCompilerPlugins pluginIvyDeps
+
+publish ivyDepLocations = here, Nil
+
+global def jack = scalaModule
+
+def test Unit =
+  compileScalaModule scalaModule
+  | getPathResult
+  | getFail
+  | omap (\_ here.testNameFromDir)
+  | getOrFail ("Compilation should have failed but it succeeded!".makeError)
+
+publish apiScalaSiFiveTests = test, Nil
