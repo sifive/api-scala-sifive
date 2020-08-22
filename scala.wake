@@ -122,14 +122,20 @@ global def getIvyDepJar dep =
 
 # TODO
 # - Can we make this a fuse job? For some reason coursier can't find visible inputs
+# - Should this be public?
 # Determines transitive ivy dependencies
-# Given List IvyDep, returns List Path
+# Given Scala Version (Option), List IvyDep, returns List Path
 # Returns paths to dep jars and transitive dependencies
-global def resolveIvyDeps deps =
+def resolveIvyDepsImpl scalaVersionOpt deps =
   def depStrs = map ivyDepToString deps
   def cachedDeps = ivyCacheDeps
+  def coursierArgs =
+    def base = "-q", "--cache", ivyCache, "-m", "offline", depStrs
+    match scalaVersionOpt
+      None    = base
+      Some sv = "--scala-version", sv.scalaVersionToString, base
   def job =
-    def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache, "-m", "offline", depStrs
+    def cmd = coursierBin.getPathName, "fetch", coursierArgs
     makePlan cmd (coursierBin, cachedDeps)
     | setPlanLocalOnly True
     | runJob
@@ -150,6 +156,7 @@ global def resolveIvyDeps deps =
       def jars = getIvyDepJars fns
       if jars.len != fns.len then err jars fns else jars
 
+global def resolveIvyDeps deps = resolveIvyDepsImpl None deps
 
 # TODO improve
 global def runIvyDep dep = resolveIvyDeps (dep, Nil) | runJava
@@ -371,7 +378,7 @@ global def genMillBuild module =
     def ivyDepsJars =
       module.getScalaModuleTransIvyDeps
       | map (expandIvyDep scalaVersion)
-      | resolveIvyDeps
+      | resolveIvyDepsImpl (Some scalaVersion)
     def depJars =
       module.getScalaModuleTransDeps
       | map compileScalaModule
