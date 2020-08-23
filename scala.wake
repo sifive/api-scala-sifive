@@ -426,6 +426,94 @@ global def genMillBuild module =
     }
     %"
 
+# More convenient Pair syntax
+def a -> b = Pair a b
+
+# Prefix with wildcard for the workspace
+def inws path = "$WORKSPACE/{path}"
+
+def bloopJSONSchemaVersion = "1.4.0"
+
+global def bloopScalaLibJSON scalaVersion scalacOptions =
+  def ivyDep = scalaCompilerIvyDep scalaVersion
+  def scalaJars =
+    ivyDep
+    | (_, Nil)
+    | resolveIvyDeps
+    | map getPathName
+    | map inws
+    | map JString
+  JObject (
+    "organization" -> JString ivyDep.getIvyDepOrg,
+    "name"         -> JString ivyDep.getIvyDepName,
+    "version"      -> JString ivyDep.getIvyDepRev,
+    "options"      -> (scalacOptions | map JString | JArray),
+    "jars"         -> JArray scalaJars,
+    "setup" -> JObject (
+      "order" -> JString "mixed",
+      "addLibraryToBootClasspath"  -> JBoolean True,
+      "addCompilerToClasspath"     -> JBoolean False,
+      "addExtraJarsToClasspath"    -> JBoolean False,
+      "manageBootClasspath"        -> JBoolean True,
+      "filterLibraryFromClasspath" -> JBoolean True,
+      Nil
+    ),
+    Nil
+  )
+
+def buildDir module =
+  def suffix = module.getScalaModuleScalaVersion.scalaVersionMajorString
+  "{buildRoot.getPathName}/{module.getScalaModuleName}/scala-{suffix}"
+def moduleClassesDir module = "{module.buildDir}/classes"
+
+# Hoist some of intermediate bits to arguments
+global def bloopScalaModuleJSON module depJars =
+  def name = module.getScalaModuleName
+  def scalaVersion = module.getScalaModuleScalaVersion
+  def projectDir = module.getScalaModuleRootDir | inws
+  def depJarStrs =
+    depJars
+    | map getPathName
+    | map JString
+  def sourceFiles =
+    module.getScalaModuleAllSourceFiles
+    | map getPathName
+    | map inws
+    | map JString
+  def resourceDirs =
+    module.getScalaModuleExpandedResourceDirs
+    | map inws
+    | map JString
+  def scalaJSON =
+    def scalacOpts =
+      def pluginDepToOpt dep =
+        dep
+        | expandIvyDep scalaVersion
+        | getIvyDepJar
+        | getPathName
+        | inws
+        | ("-Xplugin:{_}")
+      def pluginOpts = module.getScalaModuleCompilerPlugins | map pluginDepToOpt
+      module.getScalaModuleScalacOptions ++ pluginOpts
+    bloopScalaLibJSON scalaVersion scalacOpts
+  JObject (
+    "version" -> JString bloopJSONSchemaVersion,
+    "project" -> JObject (
+      "name"         -> JString name,
+      "sources"      -> JArray sourceFiles,
+      "directory"    -> JString projectDir,
+      "workspaceDir" -> JString "",
+      "dependencies" -> JArray Nil, # These are expressed in classpath
+      "classpath"    -> JArray depJarStrs,
+      "out"          -> JString module.buildDir.inws,
+      "classesDir"   -> JString module.moduleClassesDir.inws,
+      "resources"    -> JArray resourceDirs,
+      "scala"        -> scalaJSON,
+      Nil
+    ),
+    Nil
+  )
+
 # TODO should we add Scala version to path?
 #    We might be able to get mill to do this
 def millBuildDir module =
