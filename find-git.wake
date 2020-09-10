@@ -1,0 +1,35 @@
+# Find a git repository.
+# A valid repository must have a directory named '.git' within it.
+# If "x/y/z/.git" is found, return "x/y/z"
+global def findGitRepository name =
+  require Pass tree = repositoryTree Unit
+  def hits = getPairFirst (tequal name tree)
+  match hits
+    Nil    = Fail (makeError "git repository '{name}' not found")
+    x, Nil = Pass x
+    _      = Fail (makeError "more than one git repository named '{name}': {catWith ", " hits}.")
+
+
+# Use the name as the fallback path if the repository is not found
+global def findGitRepositoryWithFallback name =
+  match (findGitRepository name)
+    Pass path = path
+    Fail _    = name
+
+
+target repositoryTree Unit =
+  require Pass stdout =
+    makePlan ("find", ".", "-type", "d", "-name", ".git", "-print0", Nil) Nil
+    | setPlanLocalOnly True
+    | setPlanPersistence Once
+    | setPlanStdout logNever
+    | setPlanEcho Verbose
+    | runJob
+    | getJobStdout
+  def repoName path = replace `^.*/` "" path     # Extract trailing component of the path
+  tokenize `\0` stdout                           # find outputs paths separated by a nul
+  | filter (_ !=* ".git")                        # Exclude the root repository
+  | map (replace `^\./|/\.git$` "" _)            # Strip leading ./ and trailing /.git
+  | listToTreeMulti (_.repoName <=>* _.repoName) # Sort paths by repository name
+  | Pass
+
