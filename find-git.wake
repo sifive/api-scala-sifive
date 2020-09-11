@@ -1,5 +1,5 @@
 # Find a git repository.
-# A valid repository must have a directory named '.git' within it.
+# A valid repository must have a file or directory named '.git' within it.
 # If "x/y/z/.git" is found, return "x/y/z"
 global def findGitRepository name =
   require Pass tree = repositoryTree Unit
@@ -19,7 +19,7 @@ global def findGitRepositoryWithFallback name =
 
 target repositoryTree Unit =
   require Pass stdout =
-    makePlan ("find", ".", "-type", "d", "-name", ".git", "-print0", Nil) Nil
+    makePlan ("find", ".", "-name", ".git", "-print0", Nil) Nil
     | setPlanLocalOnly True
     | setPlanPersistence Once
     | setPlanStdout logNever
