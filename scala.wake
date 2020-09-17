@@ -13,7 +13,15 @@ def resources = "python/python/3.7.1", "openjdk/java/1.8.0", Nil
 global def readIvyDepsJSON dir =
   source "{dir}/ivydependencies.json" | parseJSONFile
 
-def fetchCoursier Unit =
+# Use this to manually fetch scala dependencies, wake -x 'fetchScala Unit'
+global def fetchScala Unit =
+  match (ivyCacheDeps Unit | map getPathResult | findFail)
+    Pass _paths = Pass "ivyCacheDeps"
+    Fail err    = Fail err
+
+publish preinstall = fetchScala, Nil
+
+target fetchCoursier Unit =
   def bin = source "{here}/fetch_coursier"
   def dir = mkdir bloopInstall
   def deps = sources here `.*\.py`
@@ -22,27 +30,6 @@ def fetchCoursier Unit =
   | editPlanEnvironment ("PYTHONDONTWRITEBYTECODE=1", _)
   | runJob
   | getJobOutput
-
-def myMakeStatePath x =
-  makePlan ("<makeStatePath>", x, Nil) Nil
-  | setPlanKeep      False
-  | setPlanEcho      Verbose
-  | setPlanFnOutputs (\_ x, Nil)
-  | runJobWith       virtualRunner
-  | getJobOutput
-
-# Maintain compatibility with Wit 0.12 and below
-# Wit versions <= 0.12 have a Scala plugin that fetches Coursier, Bloop, and
-# all dependencies specified in ivydependencies.json files at the root of wit
-# packages (where the wit-manifest.json) resides.
-# To maintain backwards compatibility, accept that these dependencies may have
-# already been fetched, use virtual jobs to own the files if they already exist
-# rather than fetching them ourselves.
-def coursierBin =
-  match (files bloopInstall `.*coursier.*`)
-    bin, Nil = myMakeStatePath bin
-    Nil      = fetchCoursier Unit
-    l        = makeBadPath (makeError "Multiple coursier executables found! {catWith ", " l}")
 
 # Get ivydependencies.json files 0 or 1 levels under workspace root, or that
 # are explicitly published.
@@ -58,7 +45,8 @@ def ivyDepsFiles =
   traversed ++ published | distinctBy pathCmp
 
 # Job that fetches ivy dependencies
-def ivyCacheDeps =
+target ivyCacheDeps Unit =
+  def coursierBin = fetchCoursier Unit
   def bin = source "{here}/fetch_ivy_dependencies"
   def dir = mkdir bloopInstall
   def cache = mkdir ivyCache
@@ -84,7 +72,7 @@ def ivyCacheDeps =
 # Memoized tree for converting from Strings to Paths to jars in Coursier cache
 target ivyCacheJars Unit =
   def isJar = matches `.*\.jar` _.getPathName
-  ivyCacheDeps
+  ivyCacheDeps Unit
   | filter isJar
   | mapPartial (\p p.getPathName.stripIvyPathPrefix | omap (Pair _ p))
   | listToTree cmpIvyCachePair
@@ -121,9 +109,10 @@ global def getIvyDepJar dep =
 # Determines transitive ivy dependencies
 # Given List IvyDep, returns List Path
 # Returns paths to dep jars and transitive dependencies
-global def resolveIvyDeps deps =
+global target resolveIvyDeps deps =
+  def coursierBin = fetchCoursier Unit
   def depStrs = map ivyDepToString deps
-  def cachedDeps = ivyCacheDeps
+  def cachedDeps = ivyCacheDeps Unit
   def job =
     def cmd = coursierBin.getPathName, "fetch", "-q", "--cache", ivyCache, "-m", "offline", depStrs
     makePlan cmd (coursierBin, cachedDeps)
