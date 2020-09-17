@@ -5,6 +5,8 @@ global def runAPIScalaSiFiveTests Unit =
   | map (_ Unit)
   | findFail
 
+# Dummy topic definition to avoid cloning api-languages-sifive
+global topic preinstall : Unit => Result String Error
 
 # Utility functions for testing
 
@@ -53,7 +55,7 @@ global def fetchCoursier dest =
   | getJobOutput
 
 # Run standard Scala fetching into dir
-global def fetchScala buildDir ivyDepsFiles =
+global def fetchScalaForTest buildDir ivyDepsFiles =
   def dir = mkdir buildDir
   def scalaDir = mkdir "{dir.getPathName}/scala"
   def cacheDir = mkdir "{dir.getPathName}/ivycache"

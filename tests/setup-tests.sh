@@ -3,8 +3,6 @@
 set -euvo pipefail
 
 # This script assumes that it is running from the root of api-scala-sifive
-fetch_coursier=./fetch_coursier
-fetch_ivy_dependencies=./fetch_ivy_dependencies
 tests_path=tests
 
 wake --init .
@@ -19,8 +17,10 @@ do
   ln -snf "$(basename $file)" "${file%.*}"
 done
 
-mkdir -p scala
-mkdir -p ivycache
-$fetch_coursier scala
 ivy_dep_files=$(find $tests_path -maxdepth 2 -name 'ivydependencies.json')
-$fetch_ivy_dependencies --scala-dir scala --cache-dir ivycache $ivy_dep_files
+for file in $ivy_dep_files; do
+    path=$(dirname $file)
+    echo "publish ivyDepLocations = \"$path\", Nil" >> deps.wake
+done
+
+wake -x 'fetchScala Unit'

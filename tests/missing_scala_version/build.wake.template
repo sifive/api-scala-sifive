@@ -1,7 +1,7 @@
 
 def test Unit =
   def deps = source "{here}/foo/ivydependencies.json", Nil
-  fetchScala "{here}/build" deps
+  fetchScalaForTest "{here}/build" deps
   | map getPathResult
   | findFail
   | getFail

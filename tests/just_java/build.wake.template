@@ -2,7 +2,7 @@
 def test Unit =
   def deps = source "{here}/foo/ivydependencies.json", Nil
   # Filter no coursier because it's in scala directory
-  def fetched = fetchScala "{here}/build" deps | filter (! matches `.*/scala/coursier` _.getPathName)
+  def fetched = fetchScalaForTest "{here}/build" deps | filter (! matches `.*/scala/coursier` _.getPathName)
   def checkFor = assertHasFile fetched
   def checkNotRegex = assertNotHasRegex fetched
   Pass here.testNameFromDir
