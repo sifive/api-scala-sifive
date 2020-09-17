@@ -53,7 +53,7 @@ def get_bloop_artifacts():
 def bloop_classpath(coursier, cache, offline=True):
     deps = get_bloop_artifacts()
     offlineArgs = ["-m", "offline"] if offline else []
-    cmd = [coursier, "fetch"] + offlineArgs + ["--classpath", "--cache", cache] + deps
+    cmd = [coursier, "fetch", "-q"] + offlineArgs + ["--classpath", "--cache", cache] + deps
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, universal_newlines=True)
     return proc.stdout.rstrip()
 
@@ -236,7 +236,7 @@ def resolve_dependencies(projects: List[dict]) -> Tuple[List[tuple], List[str]]:
 
 def fetch_ivy_deps(coursier: str, cache: str, deps: tuple) -> None:
     log.debug("Fetching [{}]...".format(", ".join(deps)))
-    cmd = [coursier, "fetch", "--cache", cache] + list(deps)
+    cmd = [coursier, "fetch", "-q", "--cache", cache] + list(deps)
     proc = subprocess.run(cmd)
     if proc.returncode != 0:
         raise Exception("Unable to fetch dependencies [{}]".format(", ".join(deps)))
