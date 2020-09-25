@@ -443,38 +443,43 @@ target memoizeMillCompile name \ module =
 
   def transDeps = module.getScalaModuleTransDeps
   def buildFile = millBuildFile name module
-  def inputs =
+  def inputsResult =
     def sourceFiles = module.getScalaModuleAllSourceFiles ++ module.getScalaModuleResourceFiles
-    def depJars = map compileScalaModule transDeps
-    millBin, buildFile, depJars ++ sourceFiles ++ (ivyCacheDeps Unit)
-    | sortBy (_.getPathName <* _.getPathName) # Sorted to ensure hash is stable
-  # This is a hack to ensure that changes to visible files rerun the job
-  # We give directories as inputs to Bloop which then looks in those directories so new files m
-  def visibleHashHack =
-    def hash = (\x prim "hash") inputs
-    "VISIBLE_FILES_HASH_HACK={format hash}"
-  def cmd =
-    "bash", relMillBin, "--no-default-predef", "--home", relMillHome, "show", "{name}.jar", Nil
-  def plan =
-    makePlan cmd inputs
-    | editPlanEnvironment ("COURSIER_CACHE={relIvyCache}", visibleHashHack, _)
-    | setPlanLabel "Compiling {name}..."
-    | setPlanDirectory buildDir
-    # Mill uses the entire classpath for caching so it must be local only for incremental compile
-    | setPlanLocalOnly True
-    | setPlanFnOutputs (\_ jarName, Nil)
-    | setPlanResources resources
-    | setPlanStdout logVerbose
-    | setPlanStderr logVerbose
-  def echoOnError job path = match path.getPathError
-    None   = path
-    Some e =
-      def _ = print (formatError job plan)
-      path
-  def job = plan | runJob
-  job
-  | getJobOutput
-  | echoOnError job
+    def depJarsResult = transDeps | map compileScalaModule | map getPathResult | findFail
+    def addOtherInputs depJars =
+      millBin, buildFile, depJars ++ sourceFiles ++ (ivyCacheDeps Unit)
+      | sortBy (_.getPathName <* _.getPathName) # Sorted to ensure hash is stable
+    depJarsResult
+    | rmap addOtherInputs
+  match inputsResult
+    Pass inputs =
+      # This is a hack to ensure that changes to visible files rerun the job
+      # We give directories as inputs to Bloop which then looks in those directories so new files m
+      def visibleHashHack =
+        def hash = (\x prim "hash") inputs
+        "VISIBLE_FILES_HASH_HACK={format hash}"
+      def cmd =
+        "bash", relMillBin, "--no-default-predef", "--home", relMillHome, "show", "{name}.jar", Nil
+      def plan =
+        makePlan cmd inputs
+        | editPlanEnvironment ("COURSIER_CACHE={relIvyCache}", visibleHashHack, _)
+        | setPlanDirectory buildDir
+        # Mill uses the entire classpath for caching so it must be local only for incremental compile
+        | setPlanLocalOnly True
+        | setPlanFnOutputs (\_ jarName, Nil)
+        | setPlanResources resources
+        | setPlanStdout logVerbose
+        | setPlanStderr logVerbose
+      def echoOnError job path = match path.getPathError
+        None   = path
+        Some e =
+          def _ = print (formatError job plan)
+          path
+      def job = plan | runJob
+      job
+      | getJobOutput
+      | echoOnError job
+    Fail error = error.makeBadPath
 
 global def compileScalaModule module = memoizeMillCompile module.getScalaModuleName module
 
