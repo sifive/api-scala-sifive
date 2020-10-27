@@ -94,15 +94,15 @@ def install_coursier(install_dir, jar=False):
 # Most dependencies are in api-scala-sifive's ivydependencies.json, ideally they all would be
 #   but source jars can't currently be fetched that way
 def _fetch_mill_dependencies(coursier: str, cache: str) -> None:
-    deps = ["org.scala-sbt:compiler-bridge_2.12:1.2.5"]
+    deps = ["org.scala-sbt:compiler-bridge_2.13:1.4.0-M1"]
     fetch_ivy_deps(coursier, cache, deps, sources=True)
 
 
 def install_mill(install_dir):
     release_host = "https://github.com/lihaoyi/mill/releases/download"
-    version = "0.6.2"
-    name = "0.6.2-assembly"
-    sha256 = "5f168a6ffad517caf446c9ee88ce7cbc69c83257926c9b29d56672d8ea42f6d9"
+    version = "0.7.4"
+    name = "0.7.4-assembly"
+    sha256 = "de72363589a9db43fa7d4be41efa1fad1213aec17ca8304696e9b882bbe1acad"
     url = '{}/{}/{}'.format(release_host, version, name)
 
     filename = mill_bin(install_dir)
