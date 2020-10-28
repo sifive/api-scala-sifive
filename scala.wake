@@ -14,7 +14,8 @@ global def readIvyDepsJSON dir =
 
 # Use this to manually fetch scala dependencies, wake -x 'fetchScala Unit'
 global def fetchScala Unit =
-  match (ivyCacheDeps Unit | map getPathResult | findFail)
+  def all = fetchMill Unit, ivyCacheDeps Unit
+  match (all | map getPathResult | findFail)
     Pass _paths = Pass "ivyCacheDeps"
     Fail err    = Fail err
 
