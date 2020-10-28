@@ -2,8 +2,7 @@
   "mill": {
     "scalaVersion": "2.13.1",
     "dependencies": [
-      "org.scala-sbt::compiler-bridge:1.4.0-M1",
-      "org.scala-lang:scala-compiler:2.13.0",
+      "org.scala-sbt::zinc:1.4.0-M1",
       "com.lihaoyi::mill-scalalib-worker:0.7.4"
     ]
   }
