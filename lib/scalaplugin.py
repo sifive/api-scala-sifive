@@ -94,7 +94,7 @@ def install_coursier(install_dir, jar=False):
 # Most dependencies are in api-scala-sifive's ivydependencies.json, ideally they all would be
 #   but source jars can't currently be fetched that way
 def _fetch_mill_dependencies(coursier: str, cache: str) -> None:
-    deps = ["org.scala-sbt:compiler-bridge_2.13:1.4.0-M1"]
+    deps = ["org.scala-sbt:compiler-bridge_2.13:1.4.0-M1", "org.scala-lang:scala-reflect:2.13.0"]
     fetch_ivy_deps(coursier, cache, deps, sources=True)
 
 
