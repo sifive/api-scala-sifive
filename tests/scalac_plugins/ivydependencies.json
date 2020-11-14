@@ -1,0 +1,14 @@
+{
+  "scalac_plugins": {
+    "scalaVersion": "2.12.8",
+    "dependencies": [
+      "com.github.ghik:::silencer-lib:1.6.0"
+    ]
+  },
+  "silencer-plugin": {
+    "scalaVersion": "2.12.8",
+    "dependencies": [
+      "com.github.ghik:::silencer-plugin:1.6.0"
+    ]
+  }
+}

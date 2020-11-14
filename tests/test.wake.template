@@ -12,7 +12,6 @@ global topic preinstall : Unit => Result String Error
 
 def repoRoot = simplify "{here}/.."
 def pythonUtils = sources "{repoRoot}" `.*\.py`
-def bridgeFetcher = source "{repoRoot}/lib/scala-bridge-fetcher_2.12-0.1.0.jar"
 
 global def testNameFromDir dir =
   extract `tests/(.*)` dir
@@ -64,7 +63,7 @@ global def fetchScalaForTest buildDir ivyDepsFiles =
   def ivyNames = ivyDepsFiles | map (_.getPathName)
   def cmd = bin.getPathName, "--scala-dir", scalaDir.getPathName, "--cache-dir", cacheDir.getPathName, ivyNames
   def fetched =
-    makePlan cmd (bin, coursier, scalaDir, cacheDir, bridgeFetcher, pythonUtils ++ ivyDepsFiles)
+    makePlan cmd (bin, coursier, scalaDir, cacheDir, pythonUtils ++ ivyDepsFiles)
     | editPlanEnvironment ("PYTHONDONTWRITEBYTECODE=1", _)
     | setPlanStderr logVerbose # Suppress intentional failure printing to stderr
     | runJob

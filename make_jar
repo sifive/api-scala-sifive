@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+
+import sys
+
+if sys.version_info[0] < 3 or sys.version_info[1] < 5:
+    print("This program requires Python version 3.5 or newer")
+    sys.exit(1)
+
+import os
+import argparse
+from lib import scalaplugin
+from lib import common
+from lib import logger
+
+def get_parser():
+    parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter,
+                                     description='Create jar from directories')
+    parser.add_argument('jar', help='filename of the output jar', type=str)
+    parser.add_argument('dir', nargs='+',
+                        help='directories of class files and resources')
+
+    logger.add_verbosity_arg(parser)
+    return parser
+
+if __name__ == '__main__':
+    parser = get_parser()
+    args = parser.parse_args()
+    scalaplugin.make_jar(args.jar, args.dir)

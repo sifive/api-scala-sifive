@@ -1,4 +1,4 @@
-global def resourceInJarScalaModule = makeScalaModuleFromJSON here "resources_in_jar"
+def resourceInJarScalaModule = makeScalaModuleFromJSON here "resources_in_jar"
 
 def test Unit =
   def paths = scalaModuleClasspath resourceInJarScalaModule

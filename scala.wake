@@ -2,12 +2,9 @@
 # Important directories
 def buildRoot = mkdir "build"
 def root = mkdir "{buildRoot.getPathName}/{here}"
-def bloopDir = mkdir "{root.getPathName}/bloop"
-def bloopInstall = "scala"
+def scalaInstall = "scala"
 # Where I expect Scala Ivy dependencies to be downloaded
 def ivyCache = "ivycache"
-# Python wrapper script for invoking bloop
-def bloopWake = source "{here}/bloop_wake"
 def resources = "python/python/3.7.1", "openjdk/java/1.8.0", Nil
 
 global def readIvyDepsJSON dir =
@@ -23,7 +20,7 @@ publish preinstall = fetchScala, Nil
 
 target fetchCoursier Unit =
   def bin = source "{here}/fetch_coursier"
-  def dir = mkdir bloopInstall
+  def dir = mkdir scalaInstall
   def deps = sources here `.*\.py`
   makePlan (bin.getPathName, dir.getPathName, Nil) (bin, dir, deps)
   | setPlanResources resources
@@ -48,9 +45,9 @@ def ivyDepsFiles =
 target ivyCacheDeps Unit =
   def coursierBin = fetchCoursier Unit
   def bin = source "{here}/fetch_ivy_dependencies"
-  def dir = mkdir bloopInstall
+  def dir = mkdir scalaInstall
   def cache = mkdir ivyCache
-  def otherDeps = source "{here}/lib/scala-bridge-fetcher_2.12-0.1.0.jar", sources here `.*\.py`
+  def otherDeps = sources here `.*\.py`
   def cmd =
     "python3", bin.getPathName, "--scala-dir", dir.getPathName, "--cache-dir",
     cache.getPathName, map getPathName ivyDepsFiles
@@ -88,7 +85,7 @@ def ivyDepToCoursierCache (IvyDep org name rev) =
 def cmpIvyCachePair (Pair n1 _) (Pair n2 _) = n1 <=>* n2
 
 def getIvyDepJars filenames =
-  def dummyPath = bloopWake # A explicitly dummy path
+  def dummyPath = root # A explicitly dummy path
   def pairs = map (Pair _ dummyPath) filenames
   def mtree = listToTree cmpIvyCachePair pairs
   (ivyCacheJars Unit) ∩ mtree | treeToList | map getPairSecond
@@ -337,143 +334,106 @@ global def getScalaModuleTransIvyDeps module =
   def cmp = _.unexpandedIvyDepToString <=>* _.unexpandedIvyDepToString
   allMods | mapFlat getScalaModuleIvyDeps | distinctBy cmp
 
-# Prefix with wildcard for the workspace
-def inws path = "$WORKSPACE/{path}"
-
-# TODO implement scalacOptions
-def bloopScalaLibJSON scalaVersion scalacOptions =
-  def ivyDep = scalaCompilerIvyDep scalaVersion
-  def ivyJars = resolveIvyDeps (ivyDep, Nil)
-  def jars = ivyJars | map getPathName | map inws | map JString | JArray
-  JObject (
-    "organization" → JString ivyDep.getIvyDepOrg,
-    "name"         → JString ivyDep.getIvyDepName,
-    "version"      → JString ivyDep.getIvyDepRev,
-    "options"      → scalacOptions | map JString | JArray,
-    "jars"         → jars,
-    "setup" → JObject (
-      "order" → JString "mixed",
-      "addLibraryToBootClasspath" → JBoolean True,
-      "addCompilerToClasspath" → JBoolean False,
-      "addExtraJarsToClasspath" → JBoolean False,
-      "manageBootClasspath" → JBoolean True,
-      "filterLibraryFromClasspath" → JBoolean True,
-      Nil
-    ),
-    Nil
-  )
-
+# Important output directories
 def buildDir module =
   def suffix = module.getScalaModuleScalaVersion.scalaVersionMajorString
-  "{buildRoot.getPathName}/{module.getScalaModuleName}/scala-{suffix}"
-def bloopOutDir module = "{bloopDir.getPathName}/{module.getScalaModuleName}"
-def moduleClassesDir module = "{module.buildDir}/classes"
+  mkdir "{buildRoot.getPathName}/{module.getScalaModuleName}/scala-{suffix}"
+def moduleClassesDir module = mkdir "{module.buildDir.getPathName}/classes"
+def moduleOutputJar module = "{module.buildDir.getPathName}/out.jar"
 
-# Assumes ScalaModule itself is valid
-def bloopScalaModuleJSON module =
-  def name = module.getScalaModuleName
-  def dir = module.getScalaModuleRootDir
-  def ver = module.getScalaModuleScalaVersion
-  def transDeps = module.getScalaModuleTransDeps
-  def ivyClasspath =
+# Utilities for dealing with Pairs
+def pcat pairsOfLists =
+  def helper (Pair l1 r1) (Pair l2 r2) = Pair (l1 ++ l2) (r1 ++ r2)
+  foldl helper (Pair Nil Nil) pairsOfLists
+
+def pmapl f (Pair l r) = Pair (f l) r
+def pmapr f (Pair l r) = Pair l (f r)
+
+def filesPair fs = Pair (fs | map getPathName) fs
+
+def scalac scalaVersion =
+  def coursierBin = fetchCoursier Unit
+  def ivyDep = scalaCompilerIvyDep scalaVersion | ivyDepToString
+  def l = coursierBin.getPathName, "launch", "--cache", ivyCache, "-m", "offline", ivyDep, "-M", "scala.tools.nsc.Main", Nil
+  def r = coursierBin, ivyCacheDeps Unit
+  Pair l r
+
+# Get all compile dependencies as jars
+# Return type: Pair (List String) (List Path)
+def scalaModuleCompileClasspath module =
+  def scalaVersion = module.getScalaModuleScalaVersion
+  def ivyJars =
     def ivyDeps = module.getScalaModuleTransIvyDeps
-    def deps = map (expandIvyDep ver) ivyDeps
-    def scalaCompiler = module.getScalaModuleScalaVersion.scalaCompilerIvyDep
-    resolveIvyDeps (scalaCompiler, deps) | map getPathName
-  def scalaJSON =
-    def scalacOpts =
-      def getPluginOpt dep = expandIvyDep ver dep | getIvyDepJar | getPathName | inws | ("-Xplugin:{_}")
-      module.getScalaModuleScalacOptions ++ (map getPluginOpt module.getScalaModuleCompilerPlugins)
-    bloopScalaLibJSON ver scalacOpts
-  def bloopVersion = "1.2.5"
-  def depClasspath = transDeps | map moduleClassesDir
-  def sourceFiles = module.getScalaModuleAllSourceFiles | map getPathName
-  def resourceDirs = module.getScalaModuleExpandedResourceDirs
-  JObject (
-    "version" → JString bloopVersion,
-    "project" → JObject (
-      "name" → JString name,
-      "directory" → JString dir.inws,
-      "sources" → sourceFiles | map inws | map JString | JArray,
-      # Until bloop incremental compilation works when invoked as CLI, lie about dependencies
-      #"dependencies" → map getScalaModuleName modDeps | map JString | JArray,
-      "dependencies" → JArray Nil,
-      "classpath" → ivyClasspath ++ depClasspath | map inws | map JString | JArray,
-      "out" → module.bloopOutDir.inws | JString,
-      "classesDir" → module.moduleClassesDir.inws | JString,
-      "resources" → resourceDirs | map inws | map JString | JArray,
-      "scala" → scalaJSON,
-      Nil
-    ),
-    Nil
-  )
+    def deps = ivyDeps | map (expandIvyDep scalaVersion _)
+    def scalaLibDep = scalaVersion.scalaLibraryIvyDep
+    (scalaLibDep, deps)
+    | resolveIvyDeps
+  def moduleJars =
+    module.getScalaModuleTransDeps
+    | map compileScalaModule
+  moduleJars ++ ivyJars
+  | filesPair
 
-# TODO is this necessary anymore?
-target memoizeBloopTemplate name \ module =
-  def content = bloopScalaModuleJSON module | prettyJSON
-  write (bloopTemplateName module) content
-def bloopTemplate module =
-  memoizeBloopTemplate module.getScalaModuleName module
+# Get plugins as arguments to Scalac
+# Return type: Pair (List String) (List Path)
+def compilerPluginsAsArgs module =
+  def scalaVersion = module.getScalaModuleScalaVersion
+  module.getScalaModuleCompilerPlugins
+  | map (expandIvyDep scalaVersion)
+  | map getIvyDepJar
+  | filesPair
+  | pmapl (map ("-Xplugin:{_}"))
 
-def bloopTemplateName module =
-  def name = module.getScalaModuleName
-  "{bloopDir.getPathName}/{name}.json.template"
+# Get all arguments to compile the module with Scalac
+# Also return List of all files that need to be read for compilation
+# Return type: Pair (List String) (List Path)
+def scalacArgs module =
+  def classpath =
+    scalaModuleCompileClasspath module
+    | pmapl (catWith ":")
+    | pmapl ("-classpath {_}", Nil)
+  def destDir =
+     def dir = module.moduleClassesDir
+     Pair ("-d {dir.getPathName}", Nil) (dir, Nil)
+  def scalacOpts = Pair module.getScalaModuleScalacOptions Nil
+  def pluginArgs = compilerPluginsAsArgs module
+  def sourceFiles = module.getScalaModuleAllSourceFiles | filesPair
+  pcat (classpath, destDir,  scalacOpts, pluginArgs, sourceFiles, Nil)
 
-def bloopConfigName module =
-  def name = module.getScalaModuleName
-  "{bloopDir.getPathName}/{name}.json"
+# Write all arguments to Scalac to compile this module to a file
+def scalacArgsFile module =
+  def filename = "{module.buildDir.getPathName}/scalac_args"
+  match (scalacArgs module)
+    Pair lines files =
+      def content = catWith "\n" lines
+      def written = write filename content
+      Pair written (written, files)
 
-# Compiles a ScalaModule, returns bloop config and generated jar file
-target memoizeBloopCompile name \ module =
-  def bin = bloopWake
-  def transDeps = module.getScalaModuleTransDeps
-  def configTemplate = module.bloopTemplate
-  def configFilename = module.bloopConfigName
-  def jarDir = mkdir "{module.buildDir}/jar"
-  def jarName = "{jarDir.getPathName}/{name}.jar"
-  def inputs =
-    def sourceFiles = module.getScalaModuleAllSourceFiles ++ module.getScalaModuleResourceFiles
-    def depJars = map compileScalaModule transDeps
-    def configs = map bloopConfig transDeps
-    bin, configTemplate, configs ++ depJars ++ sourceFiles
-    | sortBy (_.getPathName <* _.getPathName) # Sorted to ensure hash is stable
-  # This is a hack to ensure that changes to visible files rerun the job
-  # We give directories as inputs to Bloop which then looks in those directories so new files m
-  def visibleHashHack =
-    def hash = (\x prim "hash") inputs
-    "VISIBLE_FILES_HASH_HACK={format hash}"
-  def bloopArgs =
-    def args = "compile", "-c", bloopDir.getPathName, module.getScalaModuleName, Nil
-    args | catWith " "
-  def cmd =
-    "python3", bin.getPathName, "-t", configTemplate.getPathName, "-c", configFilename , "-b", bloopInstall
-    , "--coursier-cache", ivyCache, "--bloop-args", bloopArgs, "--jar", jarName, Nil
-  def plan =
-    makePlan cmd inputs
-    | editPlanEnvironment ("JAVA_OPTS=-Xss8M", visibleHashHack, _)
-    | setPlanFnInputs (\_ inputs | map getPathName)
-    | setPlanLocalOnly True
-    | setPlanFnOutputs (\_ configFilename, jarName, Nil)
-    | setPlanResources resources
-    | runJob
-  def err paths = Fail (makeError "Expected exactly one json and one jar, got {format paths}")
-  def result = match plan.getJobOutputs
-    json, jar, Nil = Pass (Pair json jar)
-    # If the job fails, it returns 1 BadPath
-    one, Nil       = one.getPathError | omap Fail | getOrElse (err (one, Nil))
-    l              = err l
-  # Compose possible errors
-  module.scalaModuleToResult
-  | rmapPass (\_ result)
-def bloopCompile module = memoizeBloopCompile module.getScalaModuleName module
+def scalacCompile module =
+  def Pair baseCmd vfiles1 = scalac module.getScalaModuleScalaVersion
+  def Pair argFile vfiles2 = scalacArgsFile module
+  def cmd = baseCmd ++ ("--", "@{argFile.getPathName}", Nil)
+  makePlan cmd (vfiles1 ++ vfiles2)
+  | setPlanResources resources
+  | runJob
 
-def bloopConfig module = match module.bloopCompile
-  Pass (Pair f _) = f
-  Fail err        = makeBadPath err
+def compileAndJar module =
+  def compiledArtifacts = scalacCompile module | getJobOutputs
+  def allDirs = module.moduleClassesDir.getPathName, module.getScalaModuleExpandedResourceDirs
+  def resourceFiles = module.getScalaModuleResourceFiles
+  def bin = source "{here}/make_jar"
+  def pyDeps = sources here `.*\.py`
+  def cmd = "python3", bin.getPathName, module.moduleOutputJar, allDirs
+  def inputs = bin, pyDeps ++ compiledArtifacts ++ resourceFiles
+  makePlan cmd inputs
+  | editPlanEnvironment ("PYTHONDONTWRITEBYTECODE=1", _)
+  | setPlanResources resources
+  | runJob
 
-global def compileScalaModule module = match module.bloopCompile
-  Pass (Pair _ s) = s
-  Fail err        = makeBadPath err
+global def compileScalaModule module =
+  match module.scalaModuleToResult
+    Pass _   = module.compileAndJar | getJobOutput
+    Fail err = makeBadPath err
 
 # Returns the full classpath to run the module
 global def scalaModuleClasspath module =

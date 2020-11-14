@@ -3,7 +3,7 @@ bin/
 .coursier
 build/
 ivycache/
-scala/
+/scala/
 __pycache__/
 *.swp
 *.fuse*
